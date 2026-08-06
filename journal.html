@@ -9681,6 +9681,53 @@ async function saveTradeToOperatorsLocalDatabase(trade,providedKey){
   }
 }
 
+async function updateTradeInOperatorsLocalDatabase(trade,providedKey){
+  if(!trade.operatorsDbRecordId)return{saved:true,skipped:true};
+  const key=providedKey||localStorage.getItem('operators_local_api_key');
+  if(!key){trade.operatorsDbUpdatePending=true;return{saved:false,reason:'no-key'};}
+  try{
+    const response=await fetch('http://127.0.0.1:5784/api/trades/'+encodeURIComponent(trade.operatorsDbRecordId),{
+      method:'PUT',
+      headers:{'X-Operators-Key':key,'Content-Type':'application/json'},
+      body:JSON.stringify(operatorsTradePayload(trade))
+    });
+    if(response.status===401)throw new Error('The local database key is incorrect.');
+    if(!response.ok)throw new Error('Local database returned '+response.status+'.');
+    const record=await response.json();
+    trade.operatorsDbRecordId=record.id;
+    trade.operatorsDbUpdatePending=false;
+    return{saved:true,record:record};
+  }catch(error){
+    trade.operatorsDbUpdatePending=true;
+    return{saved:false,error:error};
+  }
+}
+
+function queueOperatorsDatabaseDelete(recordId){
+  if(!recordId)return;
+  let pending=[];
+  try{pending=JSON.parse(localStorage.getItem('operators_db_pending_deletes')||'[]');}catch(error){}
+  if(!pending.includes(recordId))pending.push(recordId);
+  localStorage.setItem('operators_db_pending_deletes',JSON.stringify(pending));
+}
+
+async function deleteTradeFromOperatorsLocalDatabase(trade,providedKey){
+  if(!trade||!trade.operatorsDbRecordId)return{deleted:true,skipped:true};
+  const key=providedKey||localStorage.getItem('operators_local_api_key');
+  if(!key){queueOperatorsDatabaseDelete(trade.operatorsDbRecordId);return{deleted:false};}
+  try{
+    const response=await fetch('http://127.0.0.1:5784/api/trades/'+encodeURIComponent(trade.operatorsDbRecordId),{
+      method:'DELETE',headers:{'X-Operators-Key':key}
+    });
+    if(response.status===401)throw new Error('The local database key is incorrect.');
+    if(!response.ok&&response.status!==404)throw new Error('Local database returned '+response.status+'.');
+    return{deleted:true};
+  }catch(error){
+    queueOperatorsDatabaseDelete(trade.operatorsDbRecordId);
+    return{deleted:false,error:error};
+  }
+}
+
 async function syncPendingOperatorsTrades(key){
   const pending=state.trades.filter(function(trade){
     return trade.operatorsDbPending&&!trade.operatorsDbRecordId&&!trade.importedFromOperatorsDb;
@@ -9691,6 +9738,25 @@ async function syncPendingOperatorsTrades(key){
     if(result.saved)synced++;
   }
   return synced;
+}
+
+async function syncPendingOperatorsMutations(key){
+  let updated=0,deleted=0;
+  const updates=state.trades.filter(function(trade){return trade.operatorsDbUpdatePending&&trade.operatorsDbRecordId;});
+  for(const trade of updates){
+    const result=await updateTradeInOperatorsLocalDatabase(trade,key);
+    if(result.saved)updated++;
+  }
+
+  let pendingDeletes=[];
+  try{pendingDeletes=JSON.parse(localStorage.getItem('operators_db_pending_deletes')||'[]');}catch(error){}
+  const remaining=[];
+  for(const recordId of pendingDeletes){
+    const result=await deleteTradeFromOperatorsLocalDatabase({operatorsDbRecordId:recordId},key);
+    if(result.deleted)deleted++;else remaining.push(recordId);
+  }
+  localStorage.setItem('operators_db_pending_deletes',JSON.stringify(remaining));
+  return{updated:updated,deleted:deleted};
 }
 
 async function connectOperatorsLocalDatabase(){
@@ -9733,10 +9799,13 @@ async function connectOperatorsLocalDatabase(){
 
     localStorage.setItem('operators_local_api_key',key);
     const synced=await syncPendingOperatorsTrades(key);
+    const mutations=await syncPendingOperatorsMutations(key);
     await saveState();
     const messages=[];
     if(added)messages.push(added+' imported');
     if(synced)messages.push(synced+' pending trade'+(synced===1?'':'s')+' saved');
+    if(mutations.updated)messages.push(mutations.updated+' update'+(mutations.updated===1?'':'s')+' synchronized');
+    if(mutations.deleted)messages.push(mutations.deleted+' deletion'+(mutations.deleted===1?'':'s')+' synchronized');
     showToast(messages.length?messages.join(' · '):'Trade history already synchronized');
     renderPage();
   }catch(error){
@@ -9777,10 +9846,12 @@ async function addTradeFromForm(e){
   renderPage();
 }
 async function deleteTrade(id){
+  const trade=state.trades.find(t=>t.id===id);
+  const databaseResult=await deleteTradeFromOperatorsLocalDatabase(trade);
   state.trades=state.trades.filter(t=>t.id!==id);
   await saveState();
   try{await window.storage.delete(shotsKey(id));}catch(e){}
-  showToast('Trade #'+id+' removed');renderPage();
+  showToast(databaseResult.deleted?'Trade #'+id+' removed from Operators Database':'Trade removed locally · database deletion pending');renderPage();
 }
 async function duplicateTrade(id){
   const src=state.trades.find(x=>x.id===id);
@@ -9880,7 +9951,9 @@ async function saveTradeEdit(id){
   t.session=document.getElementById('ef-session').value;
   t.quality=document.getElementById('ef-quality').value;
   t.notes=document.getElementById('ef-notes').value;
-  await saveState();closeEditTradeModal();showToast('Trade #'+id+' updated');renderPage();
+  const databaseResult=await updateTradeInOperatorsLocalDatabase(t);
+  await saveState();closeEditTradeModal();
+  showToast(databaseResult.saved?'Trade #'+id+' updated in Operators Database':'Trade updated locally · database sync pending');renderPage();
 }
 function closeEditTradeModal(){const ov=document.getElementById('edit-trade-overlay');if(ov)ov.remove();}
 
