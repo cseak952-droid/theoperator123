@@ -9636,16 +9636,43 @@ function pageDashboard(){
 function operatorsLocalConnectorHTML(){
   const hasKey=!!localStorage.getItem('operators_local_api_key');
   return`<style>
-    .operators-local-db{margin:0 0 18px;padding:16px 18px;border:1px solid rgba(57,215,255,.22);border-radius:12px;background:linear-gradient(135deg,rgba(13,31,52,.92),rgba(20,14,45,.92));display:grid;grid-template-columns:minmax(220px,1fr) minmax(260px,1.4fr) auto auto;gap:12px;align-items:center}
+    .operators-local-db{margin:0 0 18px;padding:16px 18px;border:1px solid rgba(57,215,255,.22);border-radius:12px;background:linear-gradient(135deg,rgba(13,31,52,.92),rgba(20,14,45,.92));display:grid;grid-template-columns:minmax(220px,1fr) minmax(240px,1.3fr) auto auto auto;gap:10px;align-items:center}
     .operators-local-title{font-weight:800;color:#72e4ff;letter-spacing:.04em}.operators-local-sub{font-size:11px;color:var(--text-faint);margin-top:3px}
     .operators-local-db input{width:100%;box-sizing:border-box}.operators-local-status{font-size:11px;color:${hasKey?'#67e8b5':'#93a4bd'};margin-top:5px}
     @media(max-width:900px){.operators-local-db{grid-template-columns:1fr}.operators-local-db .btn{width:100%}}
   </style><div class="operators-local-db">
     <div><div class="operators-local-title">OPERATORS LOCAL DATABASE</div><div class="operators-local-sub">Secure desktop-to-website trade history connector</div></div>
     <div><input id="operators-local-key" type="password" value="${hasKey?'••••••••••••••••':''}" placeholder="Paste Local API Key"><div id="operators-local-status" class="operators-local-status">${hasKey?'Key saved · ready to connect':'Desktop app must be running'}</div></div>
-    <button type="button" class="btn btn-gold" onclick="connectOperatorsLocalDatabase()">Connect & Load Trades</button>
+    <button type="button" class="btn btn-gold" onclick="pairOperatorsLocalDatabase()">Pair Automatically</button>
+    <button type="button" class="btn" onclick="connectOperatorsLocalDatabase()">Connect & Load Trades</button>
     <button type="button" class="btn" onclick="forgetOperatorsLocalDatabase()">Forget Key</button>
   </div>`;
+}
+
+async function pairOperatorsLocalDatabase(){
+  const status=document.getElementById('operators-local-status');
+  const input=document.getElementById('operators-local-key');
+  if(status){status.textContent='Waiting for approval in the desktop app…';status.style.color='#ffd27a';}
+
+  try{
+    const response=await fetch('http://127.0.0.1:5784/api/pair',{
+      method:'POST',cache:'no-store'
+    });
+
+    if(response.status===403)throw new Error('Pairing was not approved in the desktop app.');
+    if(response.status===429)throw new Error('Please wait a moment before trying again.');
+    if(!response.ok)throw new Error('Could not pair with the desktop database.');
+
+    const result=await response.json();
+    if(!result.apiKey)throw new Error('The desktop app did not return a pairing key.');
+
+    localStorage.setItem('operators_local_api_key',result.apiKey);
+    if(input)input.value='••••••••••••••••';
+    if(status){status.textContent='Paired successfully · loading trades…';status.style.color='#67e8b5';}
+    await connectOperatorsLocalDatabase(result.apiKey);
+  }catch(error){
+    if(status){status.textContent=error.message||'Pairing failed. Keep the desktop app open.';status.style.color='#ff9aaf';}
+  }
 }
 
 function operatorsTradePayload(trade){
@@ -9759,12 +9786,12 @@ async function syncPendingOperatorsMutations(key){
   return{updated:updated,deleted:deleted};
 }
 
-async function connectOperatorsLocalDatabase(){
+async function connectOperatorsLocalDatabase(providedKey){
   const input=document.getElementById('operators-local-key');
   const status=document.getElementById('operators-local-status');
   const entered=(input&&input.value||'').trim();
   const masked=/^•+$/.test(entered);
-  const key=masked?localStorage.getItem('operators_local_api_key'):entered;
+  const key=providedKey||(masked?localStorage.getItem('operators_local_api_key'):entered);
 
   if(!key){if(status){status.textContent='Paste the API key copied from the desktop app.';status.style.color='#ff9aaf';}return;}
   if(status){status.textContent='Connecting to 127.0.0.1:5784…';status.style.color='#ffd27a';}

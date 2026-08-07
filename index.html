@@ -1527,7 +1527,7 @@ async function showApp(){
     const frame = document.getElementById('journalFrame');
     frame.addEventListener('load', function(){ connectJournalFrame(frame); }, { once:true });
     // Versioned URL prevents GitHub Pages/browser cache from serving an older journal UI.
-    let journalUrl = 'journal.html?v=20260806-local-database-crud-3';
+    let journalUrl = 'journal.html?v=20260807-autostart-pairing-1';
     if(!getRequestedFlexSlug()){
       try{
         const authResult = await supabaseClient.auth.getSession();
