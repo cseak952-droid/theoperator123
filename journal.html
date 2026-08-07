@@ -9633,8 +9633,15 @@ function pageDashboard(){
   return _html;
 }
 
+let operatorsLocalConnectionState='idle';
+
 function operatorsLocalConnectorHTML(){
   const hasKey=!!localStorage.getItem('operators_local_api_key');
+  const statusText=operatorsLocalConnectionState==='connected'
+    ?'Connected · trades synchronized'
+    :operatorsLocalConnectionState==='connecting'
+      ?'Connecting automatically…'
+      :(hasKey?'Key saved · reconnecting automatically':'Desktop app must be running');
   return`<style>
     .operators-local-db{margin:0 0 18px;padding:16px 18px;border:1px solid rgba(57,215,255,.22);border-radius:12px;background:linear-gradient(135deg,rgba(13,31,52,.92),rgba(20,14,45,.92));display:grid;grid-template-columns:minmax(220px,1fr) minmax(240px,1.3fr) auto auto auto;gap:10px;align-items:center}
     .operators-local-title{font-weight:800;color:#72e4ff;letter-spacing:.04em}.operators-local-sub{font-size:11px;color:var(--text-faint);margin-top:3px}
@@ -9642,7 +9649,7 @@ function operatorsLocalConnectorHTML(){
     @media(max-width:900px){.operators-local-db{grid-template-columns:1fr}.operators-local-db .btn{width:100%}}
   </style><div class="operators-local-db">
     <div><div class="operators-local-title">OPERATORS LOCAL DATABASE</div><div class="operators-local-sub">Secure desktop-to-website trade history connector</div></div>
-    <div><input id="operators-local-key" type="password" value="${hasKey?'••••••••••••••••':''}" placeholder="Paste Local API Key"><div id="operators-local-status" class="operators-local-status">${hasKey?'Key saved · ready to connect':'Desktop app must be running'}</div></div>
+    <div><input id="operators-local-key" type="password" value="${hasKey?'••••••••••••••••':''}" placeholder="Paste Local API Key"><div id="operators-local-status" class="operators-local-status">${statusText}</div></div>
     <button type="button" class="btn btn-gold" onclick="pairOperatorsLocalDatabase()">Pair Automatically</button>
     <button type="button" class="btn" onclick="connectOperatorsLocalDatabase()">Connect & Load Trades</button>
     <button type="button" class="btn" onclick="forgetOperatorsLocalDatabase()">Forget Key</button>
@@ -9793,7 +9800,8 @@ async function connectOperatorsLocalDatabase(providedKey){
   const masked=/^•+$/.test(entered);
   const key=providedKey||(masked?localStorage.getItem('operators_local_api_key'):entered);
 
-  if(!key){if(status){status.textContent='Paste the API key copied from the desktop app.';status.style.color='#ff9aaf';}return;}
+  if(!key){operatorsLocalConnectionState='idle';if(status){status.textContent='Paste the API key copied from the desktop app.';status.style.color='#ff9aaf';}return;}
+  operatorsLocalConnectionState='connecting';
   if(status){status.textContent='Connecting to 127.0.0.1:5784…';status.style.color='#ffd27a';}
 
   try{
@@ -9833,14 +9841,17 @@ async function connectOperatorsLocalDatabase(providedKey){
     if(synced)messages.push(synced+' pending trade'+(synced===1?'':'s')+' saved');
     if(mutations.updated)messages.push(mutations.updated+' update'+(mutations.updated===1?'':'s')+' synchronized');
     if(mutations.deleted)messages.push(mutations.deleted+' deletion'+(mutations.deleted===1?'':'s')+' synchronized');
+    operatorsLocalConnectionState='connected';
     showToast(messages.length?messages.join(' · '):'Trade history already synchronized');
     renderPage();
   }catch(error){
+    operatorsLocalConnectionState='error';
     if(status){status.textContent=error.message||'Could not connect. Keep the desktop app open.';status.style.color='#ff9aaf';}
   }
 }
 
 function forgetOperatorsLocalDatabase(){
+  operatorsLocalConnectionState='idle';
   localStorage.removeItem('operators_local_api_key');
   const input=document.getElementById('operators-local-key');if(input)input.value='';
   const status=document.getElementById('operators-local-status');if(status){status.textContent='Key removed from this browser.';status.style.color='#93a4bd';}
@@ -17109,6 +17120,10 @@ function attachPageHandlers(){
     var tradePanel=document.querySelector('.te-panel');
     if(tradePanel&&!document.querySelector('.operators-local-db')){
       tradePanel.insertAdjacentHTML('beforebegin',operatorsLocalConnectorHTML());
+    }
+    if(localStorage.getItem('operators_local_api_key')&&operatorsLocalConnectionState==='idle'){
+      operatorsLocalConnectionState='connecting';
+      setTimeout(function(){connectOperatorsLocalDatabase();},0);
     }
   }
   var form=document.getElementById('trade-form');
