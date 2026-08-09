@@ -9643,6 +9643,8 @@ let operatorsDatabaseTransport='unknown';
 let operatorsRelayConnection=null;
 let operatorsRelayStartPromise=null;
 const operatorsRelayPendingRequests=new Map();
+const operatorsTradeSyncInFlight=new Map();
+let operatorsTradeSubmitInProgress=false;
 
 function setOperatorsDatabaseStatus(message,color){
   const status=document.getElementById('operators-local-status');
@@ -9940,8 +9942,26 @@ async function pairOperatorsLocalDatabase(){
   }
 }
 
+function operatorsBrowserInstanceId(){
+  let browserId=localStorage.getItem('operators_browser_instance_id')||'';
+  if(!/^[a-z0-9]{16,64}$/.test(browserId)){
+    browserId=createOperatorsRequestId().replace(/-/g,'').toLowerCase();
+    localStorage.setItem('operators_browser_instance_id',browserId);
+  }
+  return browserId;
+}
+
+function operatorsTradeClientId(trade){
+  if(!trade.operatorsDbClientId){
+    const accountId=state.activeAccountId||'default';
+    trade.operatorsDbClientId='web-'+operatorsBrowserInstanceId()+'-'+accountId+'-'+trade.id;
+  }
+  return trade.operatorsDbClientId;
+}
+
 function operatorsTradePayload(trade){
   return{
+    clientTradeId:operatorsTradeClientId(trade),
     date:trade.date||'',side:trade.side||'',pair:trade.pair||'',symbol:trade.pair||'',
     strategy:trade.strategy||'',lot:String(trade.lot??''),entry:String(trade.entry??''),
     exit:String(trade.exit??''),sl:String(trade.sl??''),tp:String(trade.tp??''),
@@ -9952,18 +9972,34 @@ function operatorsTradePayload(trade){
 }
 
 async function saveTradeToOperatorsLocalDatabase(trade,providedKey){
+  const clientTradeId=operatorsTradeClientId(trade);
+  if(operatorsTradeSyncInFlight.has(clientTradeId)){
+    return operatorsTradeSyncInFlight.get(clientTradeId);
+  }
+
   const key=providedKey||localStorage.getItem('operators_local_api_key');
   if(!key){trade.operatorsDbPending=true;return{saved:false,reason:'no-key'};}
 
+  const syncPromise=(async function(){
+    try{
+      const record=normalizeOperatorsRecord(await operatorsDatabaseRequest(
+        'create_trade',operatorsTradePayload(trade),key));
+      trade.operatorsDbRecordId=record.id;
+      trade.operatorsDbPending=false;
+      return{saved:true,record:record};
+    }catch(error){
+      trade.operatorsDbPending=true;
+      return{saved:false,reason:'offline',error:error};
+    }
+  })();
+
+  operatorsTradeSyncInFlight.set(clientTradeId,syncPromise);
   try{
-    const record=normalizeOperatorsRecord(await operatorsDatabaseRequest(
-      'create_trade',operatorsTradePayload(trade),key));
-    trade.operatorsDbRecordId=record.id;
-    trade.operatorsDbPending=false;
-    return{saved:true,record:record};
-  }catch(error){
-    trade.operatorsDbPending=true;
-    return{saved:false,reason:'offline',error:error};
+    return await syncPromise;
+  }finally{
+    if(operatorsTradeSyncInFlight.get(clientTradeId)===syncPromise){
+      operatorsTradeSyncInFlight.delete(clientTradeId);
+    }
   }
 }
 
@@ -10126,18 +10162,31 @@ function pageTrades(){
   ${groups||`<div class="empty-state">${ICONS.book}<div>No trades logged yet. Add your first one above, or seed demo data.</div></div>`}`;}
 async function addTradeFromForm(e){
   e.preventDefault();
+  if(operatorsTradeSubmitInProgress){
+    showToast('This trade is already being saved');
+    return;
+  }
+  operatorsTradeSubmitInProgress=true;
   const id=state.nextId++;
   const lotVal=parseFloat(document.getElementById('f-lot').value)||0;
   const trade={id,date:document.getElementById('f-date').value,side:document.getElementById('f-side').value,pair:(document.getElementById('f-pair').value||'XAUUSD').toUpperCase().trim(),strategy:(document.getElementById('f-strategy').value||'').trim(),lot:lotVal,entry:document.getElementById('f-entry').value,exit:document.getElementById('f-exit').value,sl:document.getElementById('f-sl').value,tp:document.getElementById('f-tp').value,session:document.getElementById('f-session').value,quality:document.getElementById('f-quality').value,notes:document.getElementById('f-notes').value,shotCount:pendingShots.length,slRemoved:!!document.getElementById('f-sl-removed').checked,ruleBroken:!!document.getElementById('f-rule-broken').checked,oversized:lotVal>(state.maxLotSize||1)};
+  trade.operatorsDbPending=true;
+  operatorsTradeClientId(trade);
   state.trades.push(trade);
   if(pendingShots.length>0){
     try{await window.storage.set(shotsKey(id),JSON.stringify(pendingShots));}catch(err){console.error(err);}
   }
   pendingShots=[];
-  const databaseResult=await saveTradeToOperatorsLocalDatabase(trade);
   await saveState();
-  showToast(databaseResult.saved?'Trade saved to Operators Database':'Trade saved locally · database sync pending');
+  showToast('Trade saved locally; synchronizing with Operators Database');
   renderPage();
+  try{
+    const databaseResult=await saveTradeToOperatorsLocalDatabase(trade);
+    await saveState();
+    showToast(databaseResult.saved?'Trade saved to Operators Database':'Trade saved locally; database sync pending');
+  }finally{
+    operatorsTradeSubmitInProgress=false;
+  }
 }
 async function deleteTrade(id){
   const trade=state.trades.find(t=>t.id===id);
