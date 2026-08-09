@@ -6146,6 +6146,7 @@ function renderTopbar(){
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 
 function renderPage(){
+  if(typeof restoreOperatorsPendingTrades==='function')restoreOperatorsPendingTrades();
   const el=document.getElementById('page');
   if(currentPage==='dashboard'){el.innerHTML=pageDashboard();el.classList.add('dashboard-page');}
   else{el.classList.remove('dashboard-page');
@@ -9654,6 +9655,7 @@ const operatorsRelayPendingRequests=new Map();
 const operatorsTradeSyncInFlight=new Map();
 let operatorsTradeSubmitInProgress=false;
 const OPERATORS_PENDING_TRADES_STORAGE_KEY='operators_pending_trades_v1';
+const OPERATORS_RELAY_BUILD='2026.08.10.5';
 
 function setOperatorsDatabaseStatus(message,color){
   const status=document.getElementById('operators-local-status');
@@ -9900,7 +9902,7 @@ function operatorsLocalConnectorHTML(){
     .operators-local-db input{width:100%;box-sizing:border-box}.operators-local-db input+input{margin-top:7px}.operators-local-status{font-size:11px;color:${hasKey?'#67e8b5':'#93a4bd'};margin-top:5px}
     @media(max-width:900px){.operators-local-db{grid-template-columns:1fr}.operators-local-db .btn{width:100%}}
   </style><div class="operators-local-db">
-    <div><div class="operators-local-title">OPERATORS LOCAL DATABASE</div><div class="operators-local-sub">Same-PC localhost with secure mobile relay fallback</div></div>
+    <div><div class="operators-local-title">OPERATORS LOCAL DATABASE</div><div class="operators-local-sub">Same-PC localhost with secure mobile relay fallback</div><div class="operators-local-sub">Build ${OPERATORS_RELAY_BUILD} Â· Offline queue ${readOperatorsPendingTradeQueue().length}</div></div>
     <div><input id="operators-local-key" type="password" value="" placeholder="${hasKey?'Local API Key saved':'Paste Local API Key'}"><input id="operators-relay-device" type="password" value="" placeholder="${hasDeviceId?'Mobile Connection Code saved':'Paste Mobile Connection Code'}"><div id="operators-local-status" class="operators-local-status">${statusText}</div></div>
     <button type="button" class="btn btn-gold" onclick="pairOperatorsLocalDatabase()">Pair Automatically</button>
     <button type="button" class="btn" onclick="connectOperatorsLocalDatabase()">Connect & Load Trades</button>
