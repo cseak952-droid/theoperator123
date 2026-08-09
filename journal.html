@@ -5441,12 +5441,18 @@ function syncActiveAccountFromState(){
   if(acc){acc.trades=state.trades;acc.startingBalance=state.startingBalance;acc.riskLimitPct=state.riskLimitPct;acc.maxLotSize=state.maxLotSize;acc.nextId=state.nextId;}
 }
 
+const OPERATORS_JOURNAL_LOCAL_STORAGE_KEY='operators_journal_state_v1';
+
 async function loadState(){
   let oldSchemaDetected=false;
   try{
     const r=await window.storage.get('aurum_journal_data');
-    if(r&&r.value){
-      const p=JSON.parse(r.value);
+    let serialized=r&&r.value?r.value:null;
+    if(!serialized){
+      serialized=localStorage.getItem(OPERATORS_JOURNAL_LOCAL_STORAGE_KEY);
+    }
+    if(serialized){
+      const p=JSON.parse(serialized);
       if(p.accounts){
         state=Object.assign(state,p);
       }else{
@@ -5496,7 +5502,9 @@ async function loadState(){
 }
 async function saveState(){
   syncActiveAccountFromState();
-  try{await window.storage.set('aurum_journal_data',JSON.stringify(state));}catch(e){console.error(e);}
+  const serialized=JSON.stringify(state);
+  try{localStorage.setItem(OPERATORS_JOURNAL_LOCAL_STORAGE_KEY,serialized);}catch(e){console.error(e);}
+  try{await window.storage.set('aurum_journal_data',serialized);}catch(e){console.error(e);}
 }
 
 async function switchAccount(newId){
