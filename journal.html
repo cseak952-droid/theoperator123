@@ -5446,10 +5446,10 @@ const OPERATORS_JOURNAL_LOCAL_STORAGE_KEY='operators_journal_state_v1';
 async function loadState(){
   let oldSchemaDetected=false;
   try{
-    const r=await window.storage.get('aurum_journal_data');
-    let serialized=r&&r.value?r.value:null;
+    let serialized=localStorage.getItem(OPERATORS_JOURNAL_LOCAL_STORAGE_KEY);
     if(!serialized){
-      serialized=localStorage.getItem(OPERATORS_JOURNAL_LOCAL_STORAGE_KEY);
+      const r=await window.storage.get('aurum_journal_data');
+      serialized=r&&r.value?r.value:null;
     }
     if(serialized){
       const p=JSON.parse(serialized);
@@ -9653,6 +9653,7 @@ let operatorsRelayStartPromise=null;
 const operatorsRelayPendingRequests=new Map();
 const operatorsTradeSyncInFlight=new Map();
 let operatorsTradeSubmitInProgress=false;
+const OPERATORS_PENDING_TRADES_STORAGE_KEY='operators_pending_trades_v1';
 
 function setOperatorsDatabaseStatus(message,color){
   const status=document.getElementById('operators-local-status');
@@ -9967,6 +9968,63 @@ function operatorsTradeClientId(trade){
   return trade.operatorsDbClientId;
 }
 
+function readOperatorsPendingTradeQueue(){
+  try{
+    const parsed=JSON.parse(localStorage.getItem(OPERATORS_PENDING_TRADES_STORAGE_KEY)||'[]');
+    return Array.isArray(parsed)?parsed:[];
+  }catch(error){return[];}
+}
+
+function writeOperatorsPendingTradeQueue(queue){
+  const serialized=JSON.stringify(queue);
+  try{
+    localStorage.setItem(OPERATORS_PENDING_TRADES_STORAGE_KEY,serialized);
+  }catch(error){
+    // Preserve the compact offline queue if the optional full-state backup used the quota.
+    localStorage.removeItem(OPERATORS_JOURNAL_LOCAL_STORAGE_KEY);
+    localStorage.setItem(OPERATORS_PENDING_TRADES_STORAGE_KEY,serialized);
+  }
+}
+
+function queueOperatorsPendingTrade(trade){
+  const clientTradeId=operatorsTradeClientId(trade);
+  const queue=readOperatorsPendingTradeQueue();
+  const entry={
+    clientTradeId:clientTradeId,
+    accountId:state.activeAccountId||1,
+    trade:Object.assign({},trade,{operatorsDbPending:true})
+  };
+  const index=queue.findIndex(item=>item&&item.clientTradeId===clientTradeId);
+  if(index>=0)queue[index]=entry;else queue.push(entry);
+  writeOperatorsPendingTradeQueue(queue);
+}
+
+function removeOperatorsPendingTrade(trade){
+  if(!trade||!trade.operatorsDbClientId)return;
+  const queue=readOperatorsPendingTradeQueue().filter(item=>
+    item&&item.clientTradeId!==trade.operatorsDbClientId);
+  writeOperatorsPendingTradeQueue(queue);
+}
+
+function restoreOperatorsPendingTrades(){
+  const queue=readOperatorsPendingTradeQueue();
+  queue.forEach(function(entry){
+    if(!entry||!entry.trade||!entry.clientTradeId)return;
+    const account=state.accounts.find(item=>item.id===entry.accountId)||getActiveAccount();
+    if(!account||account.trades.some(trade=>trade.operatorsDbClientId===entry.clientTradeId))return;
+    const restored=Object.assign({},entry.trade,{
+      operatorsDbClientId:entry.clientTradeId,
+      operatorsDbPending:true
+    });
+    if(account.trades.some(trade=>trade.id===restored.id)){
+      restored.id=account.nextId||1;
+    }
+    account.nextId=Math.max(account.nextId||1,Number(restored.id||0)+1);
+    account.trades.push(restored);
+  });
+  loadActiveAccountIntoState();
+}
+
 function operatorsTradePayload(trade){
   return{
     clientTradeId:operatorsTradeClientId(trade),
@@ -9994,6 +10052,7 @@ async function saveTradeToOperatorsLocalDatabase(trade,providedKey){
         'create_trade',operatorsTradePayload(trade),key));
       trade.operatorsDbRecordId=record.id;
       trade.operatorsDbPending=false;
+      removeOperatorsPendingTrade(trade);
       return{saved:true,record:record};
     }catch(error){
       trade.operatorsDbPending=true;
@@ -10180,6 +10239,7 @@ async function addTradeFromForm(e){
   const trade={id,date:document.getElementById('f-date').value,side:document.getElementById('f-side').value,pair:(document.getElementById('f-pair').value||'XAUUSD').toUpperCase().trim(),strategy:(document.getElementById('f-strategy').value||'').trim(),lot:lotVal,entry:document.getElementById('f-entry').value,exit:document.getElementById('f-exit').value,sl:document.getElementById('f-sl').value,tp:document.getElementById('f-tp').value,session:document.getElementById('f-session').value,quality:document.getElementById('f-quality').value,notes:document.getElementById('f-notes').value,shotCount:pendingShots.length,slRemoved:!!document.getElementById('f-sl-removed').checked,ruleBroken:!!document.getElementById('f-rule-broken').checked,oversized:lotVal>(state.maxLotSize||1)};
   trade.operatorsDbPending=true;
   operatorsTradeClientId(trade);
+  queueOperatorsPendingTrade(trade);
   state.trades.push(trade);
   if(pendingShots.length>0){
     try{await window.storage.set(shotsKey(id),JSON.stringify(pendingShots));}catch(err){console.error(err);}
@@ -10199,6 +10259,7 @@ async function addTradeFromForm(e){
 async function deleteTrade(id){
   const trade=state.trades.find(t=>t.id===id);
   const databaseResult=await deleteTradeFromOperatorsLocalDatabase(trade);
+  removeOperatorsPendingTrade(trade);
   state.trades=state.trades.filter(t=>t.id!==id);
   await saveState();
   try{await window.storage.delete(shotsKey(id));}catch(e){}
@@ -17457,6 +17518,7 @@ function attachPageHandlers(){
 async function init(){
   document.getElementById('footer-year').textContent=new Date().getFullYear();
   await loadState();
+  restoreOperatorsPendingTrades();
   const themeToApply = state.profile.theme || 'nebula-neural';
   applyTheme(themeToApply);
   renderNav();
