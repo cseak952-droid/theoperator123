@@ -4734,6 +4734,8 @@ body:has(.blublu-fg) .nav-item-blublu.active{
 }
 </style>
 
+<script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@8.0.7/dist/browser/signalr.min.js"></script>
+
 </head>
 <body>
 
@@ -9633,23 +9635,262 @@ function pageDashboard(){
   return _html;
 }
 
+const OPERATORS_LOCAL_API_BASE='http://127.0.0.1:5784';
+const OPERATORS_RELAY_HUB_URL='https://operators-db-relay.onrender.com/relay';
+const OPERATORS_DATABASE_REQUEST_TIMEOUT_MS=45000;
 let operatorsLocalConnectionState='idle';
+let operatorsDatabaseTransport='unknown';
+let operatorsRelayConnection=null;
+let operatorsRelayStartPromise=null;
+const operatorsRelayPendingRequests=new Map();
+
+function setOperatorsDatabaseStatus(message,color){
+  const status=document.getElementById('operators-local-status');
+  if(status){status.textContent=message;if(color)status.style.color=color;}
+}
+
+function readOperatorsApiKey(providedKey){
+  const input=document.getElementById('operators-local-key');
+  const entered=(input&&input.value||'').trim();
+  return providedKey||entered||localStorage.getItem('operators_local_api_key')||'';
+}
+
+function readOperatorsRelayDeviceId(providedDeviceId){
+  const input=document.getElementById('operators-relay-device');
+  const value=(providedDeviceId||(input&&input.value)||localStorage.getItem('operators_relay_device_id')||'').trim().toLowerCase();
+  if(value&&!/^[a-z0-9_-]{1,100}$/.test(value)){
+    throw new Error('The Mobile Connection Code is invalid. Copy it again from the desktop app.');
+  }
+  return value;
+}
+
+function createOperatorsRequestId(){
+  if(window.crypto&&typeof window.crypto.randomUUID==='function')return window.crypto.randomUUID();
+  const bytes=new Uint8Array(16);
+  if(window.crypto&&typeof window.crypto.getRandomValues==='function')window.crypto.getRandomValues(bytes);
+  else for(let i=0;i<bytes.length;i++)bytes[i]=Math.floor(Math.random()*256);
+  return Array.from(bytes,function(value){return value.toString(16).padStart(2,'0');}).join('');
+}
+
+function parseOperatorsResponsePayload(payload){
+  if(payload==null||payload==='')return{};
+  if(typeof payload!=='string')return payload;
+  try{return JSON.parse(payload);}catch(error){return{value:payload};}
+}
+
+function rejectOperatorsRelayRequests(error){
+  operatorsRelayPendingRequests.forEach(function(pending){
+    clearTimeout(pending.timer);
+    pending.reject(error);
+  });
+  operatorsRelayPendingRequests.clear();
+}
+
+function buildOperatorsRelayConnection(){
+  if(!window.signalR||!window.signalR.HubConnectionBuilder){
+    throw new Error('The secure mobile relay client did not load. Check the internet connection and refresh.');
+  }
+
+  const connection=new window.signalR.HubConnectionBuilder()
+    .withUrl(OPERATORS_RELAY_HUB_URL)
+    .withAutomaticReconnect([0,2000,5000,10000,20000])
+    .build();
+
+  connection.on('DatabaseResponse',function(requestId,succeeded,payload){
+    const pending=operatorsRelayPendingRequests.get(requestId);
+    if(!pending)return;
+    operatorsRelayPendingRequests.delete(requestId);
+    clearTimeout(pending.timer);
+    const parsed=parseOperatorsResponsePayload(payload);
+    if(succeeded){pending.resolve(parsed);return;}
+    pending.reject(new Error(parsed&&parsed.error?parsed.error:'The desktop database rejected the request.'));
+  });
+
+  connection.onreconnecting(function(){
+    if(operatorsDatabaseTransport==='relay'){
+      operatorsLocalConnectionState='connecting';
+      setOperatorsDatabaseStatus('Secure mobile relay reconnecting…','#ffd27a');
+    }
+  });
+  connection.onreconnected(function(){
+    if(operatorsDatabaseTransport==='relay'){
+      operatorsLocalConnectionState='connected';
+      setOperatorsDatabaseStatus('Connected through secure mobile relay','#67e8b5');
+    }
+  });
+  connection.onclose(function(error){
+    rejectOperatorsRelayRequests(error||new Error('The secure mobile relay disconnected.'));
+    if(operatorsDatabaseTransport==='relay'){
+      operatorsLocalConnectionState='error';
+      setOperatorsDatabaseStatus('Secure mobile relay disconnected. Reconnect to continue.','#ff9aaf');
+    }
+  });
+  return connection;
+}
+
+async function ensureOperatorsRelayConnection(){
+  if(!operatorsRelayConnection)operatorsRelayConnection=buildOperatorsRelayConnection();
+  const hubStates=window.signalR.HubConnectionState||{};
+  const connectedState=hubStates.Connected||'Connected';
+  const connectingState=hubStates.Connecting||'Connecting';
+  const reconnectingState=hubStates.Reconnecting||'Reconnecting';
+  if(operatorsRelayConnection.state===connectedState)return operatorsRelayConnection;
+  if(operatorsRelayStartPromise)return operatorsRelayStartPromise;
+
+  if(operatorsRelayConnection.state===connectingState||operatorsRelayConnection.state===reconnectingState){
+    await new Promise(function(resolve,reject){
+      const startedAt=Date.now();
+      const timer=setInterval(function(){
+        if(operatorsRelayConnection&&operatorsRelayConnection.state===connectedState){
+          clearInterval(timer);resolve();
+        }else if(Date.now()-startedAt>30000){
+          clearInterval(timer);reject(new Error('The secure mobile relay could not reconnect.'));
+        }
+      },250);
+    });
+    return operatorsRelayConnection;
+  }
+
+  setOperatorsDatabaseStatus('Connecting to secure mobile relay…','#ffd27a');
+  operatorsRelayStartPromise=operatorsRelayConnection.start()
+    .then(function(){return operatorsRelayConnection;})
+    .finally(function(){operatorsRelayStartPromise=null;});
+  return operatorsRelayStartPromise;
+}
+
+async function operatorsRelayRequest(operation,data,options){
+  options=options||{};
+  const deviceId=readOperatorsRelayDeviceId(options.deviceId);
+  if(!deviceId)throw new Error('Paste the Mobile Connection Code copied from the desktop app.');
+  const key=options.skipAuth?'':readOperatorsApiKey(options.apiKey);
+  if(!options.skipAuth&&!key)throw new Error('Pair this browser with the desktop database first.');
+  const connection=await ensureOperatorsRelayConnection();
+  const requestId=createOperatorsRequestId();
+  const timeoutMs=options.timeoutMs||OPERATORS_DATABASE_REQUEST_TIMEOUT_MS;
+
+  return new Promise(function(resolve,reject){
+    const timer=setTimeout(function(){
+      operatorsRelayPendingRequests.delete(requestId);
+      reject(new Error('The desktop database did not respond. Keep it running and connected to the internet.'));
+    },timeoutMs);
+    operatorsRelayPendingRequests.set(requestId,{resolve:resolve,reject:reject,timer:timer});
+    connection.invoke(
+      'SendDatabaseRequest',
+      deviceId,
+      requestId,
+      operation,
+      JSON.stringify({apiKey:key,data:data||{}})
+    ).catch(function(error){
+      const pending=operatorsRelayPendingRequests.get(requestId);
+      if(!pending)return;
+      operatorsRelayPendingRequests.delete(requestId);
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
+}
+
+async function operatorsLocalRequest(operation,data,options){
+  options=options||{};
+  let path='/api/health',method='GET',body;
+  const headers={};
+  if(operation==='pair'){path='/api/pair';method='POST';}
+  else{
+    const key=readOperatorsApiKey(options.apiKey);
+    if(!key)throw new Error('Pair this browser with the desktop database first.');
+    headers['X-Operators-Key']=key;
+    if(operation==='get_trades')path='/api/trades';
+    else if(operation==='create_trade'){path='/api/trades';method='POST';body=data;}
+    else if(operation==='update_trade'){path='/api/trades/'+encodeURIComponent(data.recordId);method='PUT';body=data.data;}
+    else if(operation==='delete_trade'){path='/api/trades/'+encodeURIComponent(data.recordId);method='DELETE';}
+    else throw new Error('Unsupported database operation: '+operation);
+  }
+  if(body!==undefined){headers['Content-Type']='application/json';body=JSON.stringify(body);}
+
+  const controller=typeof AbortController==='function'?new AbortController():null;
+  const timeoutMs=options.timeoutMs||(operation==='pair'?120000:8000);
+  const timer=controller?setTimeout(function(){controller.abort();},timeoutMs):null;
+  try{
+    const response=await fetch(OPERATORS_LOCAL_API_BASE+path,{
+      method:method,headers:headers,body:body,cache:'no-store',signal:controller?controller.signal:undefined
+    });
+    const text=response.status===204?'':await response.text();
+    const parsed=parseOperatorsResponsePayload(text);
+    if(operation==='delete_trade'&&response.status===404)return{deleted:true,notFound:true};
+    if(!response.ok){
+      const message=parsed&&(parsed.message||parsed.error)
+        ?parsed.message||parsed.error
+        :'Local database returned '+response.status+'.';
+      const error=new Error(message);
+      error.status=response.status;
+      throw error;
+    }
+    return parsed;
+  }catch(error){
+    if(!error.status){
+      if(error.name==='AbortError')error=new Error('The local database request timed out.');
+      error.operatorsNetworkError=true;
+    }
+    throw error;
+  }finally{
+    if(timer)clearTimeout(timer);
+  }
+}
+
+async function operatorsDatabaseRequest(operation,data,key){
+  if(operatorsDatabaseTransport==='relay'){
+    return operatorsRelayRequest(operation,data,{apiKey:key});
+  }
+  if(operatorsDatabaseTransport==='local'){
+    try{
+      return await operatorsLocalRequest(operation,data,{apiKey:key});
+    }catch(localError){
+      if(!localError.operatorsNetworkError||!readOperatorsRelayDeviceId())throw localError;
+      const result=await operatorsRelayRequest(operation,data,{apiKey:key});
+      operatorsDatabaseTransport='relay';
+      return result;
+    }
+  }
+
+  try{
+    const result=await operatorsLocalRequest(operation,data,{apiKey:key});
+    operatorsDatabaseTransport='local';
+    return result;
+  }catch(localError){
+    if(!localError.operatorsNetworkError)throw localError;
+    if(!readOperatorsRelayDeviceId())throw localError;
+    const result=await operatorsRelayRequest(operation,data,{apiKey:key});
+    operatorsDatabaseTransport='relay';
+    return result;
+  }
+}
+
+function normalizeOperatorsRecord(record){
+  if(!record||typeof record!=='object')return record;
+  return Object.assign({},record,{
+    id:record.id||record.Id,
+    data:record.data||record.Data||{},
+    createdAt:record.createdAt||record.CreatedAt,
+    collection:record.collection||record.Collection
+  });
+}
 
 function operatorsLocalConnectorHTML(){
   const hasKey=!!localStorage.getItem('operators_local_api_key');
+  const hasDeviceId=!!localStorage.getItem('operators_relay_device_id');
   const statusText=operatorsLocalConnectionState==='connected'
-    ?'Connected · trades synchronized'
+    ?(operatorsDatabaseTransport==='relay'?'Connected through secure mobile relay':'Connected locally · trades synchronized')
     :operatorsLocalConnectionState==='connecting'
       ?'Connecting automatically…'
-      :(hasKey?'Key saved · reconnecting automatically':'Desktop app must be running');
+      :(hasKey?(hasDeviceId?'Pairing saved · ready for local or mobile connection':'Key saved · reconnecting automatically'):'Desktop app must be running');
   return`<style>
     .operators-local-db{margin:0 0 18px;padding:16px 18px;border:1px solid rgba(57,215,255,.22);border-radius:12px;background:linear-gradient(135deg,rgba(13,31,52,.92),rgba(20,14,45,.92));display:grid;grid-template-columns:minmax(220px,1fr) minmax(240px,1.3fr) auto auto auto;gap:10px;align-items:center}
     .operators-local-title{font-weight:800;color:#72e4ff;letter-spacing:.04em}.operators-local-sub{font-size:11px;color:var(--text-faint);margin-top:3px}
-    .operators-local-db input{width:100%;box-sizing:border-box}.operators-local-status{font-size:11px;color:${hasKey?'#67e8b5':'#93a4bd'};margin-top:5px}
+    .operators-local-db input{width:100%;box-sizing:border-box}.operators-local-db input+input{margin-top:7px}.operators-local-status{font-size:11px;color:${hasKey?'#67e8b5':'#93a4bd'};margin-top:5px}
     @media(max-width:900px){.operators-local-db{grid-template-columns:1fr}.operators-local-db .btn{width:100%}}
   </style><div class="operators-local-db">
-    <div><div class="operators-local-title">OPERATORS LOCAL DATABASE</div><div class="operators-local-sub">Secure desktop-to-website trade history connector</div></div>
-    <div><input id="operators-local-key" type="password" value="${hasKey?'••••••••••••••••':''}" placeholder="Paste Local API Key"><div id="operators-local-status" class="operators-local-status">${statusText}</div></div>
+    <div><div class="operators-local-title">OPERATORS LOCAL DATABASE</div><div class="operators-local-sub">Same-PC localhost with secure mobile relay fallback</div></div>
+    <div><input id="operators-local-key" type="password" value="" placeholder="${hasKey?'Local API Key saved':'Paste Local API Key'}"><input id="operators-relay-device" type="password" value="" placeholder="${hasDeviceId?'Mobile Connection Code saved':'Paste Mobile Connection Code'}"><div id="operators-local-status" class="operators-local-status">${statusText}</div></div>
     <button type="button" class="btn btn-gold" onclick="pairOperatorsLocalDatabase()">Pair Automatically</button>
     <button type="button" class="btn" onclick="connectOperatorsLocalDatabase()">Connect & Load Trades</button>
     <button type="button" class="btn" onclick="forgetOperatorsLocalDatabase()">Forget Key</button>
@@ -9657,28 +9898,45 @@ function operatorsLocalConnectorHTML(){
 }
 
 async function pairOperatorsLocalDatabase(){
-  const status=document.getElementById('operators-local-status');
   const input=document.getElementById('operators-local-key');
-  if(status){status.textContent='Waiting for approval in the desktop app…';status.style.color='#ffd27a';}
+  const deviceInput=document.getElementById('operators-relay-device');
+  setOperatorsDatabaseStatus('Looking for the desktop app on this device…','#ffd27a');
 
   try{
-    const response=await fetch('http://127.0.0.1:5784/api/pair',{
-      method:'POST',cache:'no-store'
-    });
+    let result;
+    let pairedTransport='local';
+    try{
+      setOperatorsDatabaseStatus('Waiting for approval in the desktop app…','#ffd27a');
+      result=await operatorsLocalRequest('pair',{}, {timeoutMs:120000});
+    }catch(localError){
+      if(localError.status===403)throw new Error('Pairing was not approved in the desktop app.');
+      if(localError.status===429)throw new Error('Please wait a moment before trying again.');
+      if(!localError.operatorsNetworkError)throw localError;
 
-    if(response.status===403)throw new Error('Pairing was not approved in the desktop app.');
-    if(response.status===429)throw new Error('Please wait a moment before trying again.');
-    if(!response.ok)throw new Error('Could not pair with the desktop database.');
+      const deviceId=readOperatorsRelayDeviceId();
+      if(!deviceId){
+        throw new Error('On mobile, paste the Mobile Connection Code copied from the desktop app.');
+      }
+      setOperatorsDatabaseStatus('Waiting for remote approval in the desktop app…','#ffd27a');
+      result=await operatorsRelayRequest('pair',{
+        origin:window.location.origin||'The Operators website'
+      },{skipAuth:true,deviceId:deviceId,timeoutMs:120000});
+      pairedTransport='relay';
+    }
 
-    const result=await response.json();
     if(!result.apiKey)throw new Error('The desktop app did not return a pairing key.');
 
     localStorage.setItem('operators_local_api_key',result.apiKey);
-    if(input)input.value='••••••••••••••••';
-    if(status){status.textContent='Paired successfully · loading trades…';status.style.color='#67e8b5';}
-    await connectOperatorsLocalDatabase(result.apiKey);
+    const relayDeviceId=result.relayDeviceId||readOperatorsRelayDeviceId();
+    if(relayDeviceId)localStorage.setItem('operators_relay_device_id',relayDeviceId);
+    if(input)input.value='';
+    if(deviceInput)deviceInput.value='';
+    operatorsDatabaseTransport=pairedTransport;
+    setOperatorsDatabaseStatus('Paired successfully · loading trades…','#67e8b5');
+    await connectOperatorsLocalDatabase(result.apiKey,pairedTransport);
   }catch(error){
-    if(status){status.textContent=error.message||'Pairing failed. Keep the desktop app open.';status.style.color='#ff9aaf';}
+    operatorsLocalConnectionState='error';
+    setOperatorsDatabaseStatus(error.message||'Pairing failed. Keep the desktop app open.','#ff9aaf');
   }
 }
 
@@ -9698,14 +9956,8 @@ async function saveTradeToOperatorsLocalDatabase(trade,providedKey){
   if(!key){trade.operatorsDbPending=true;return{saved:false,reason:'no-key'};}
 
   try{
-    const response=await fetch('http://127.0.0.1:5784/api/trades',{
-      method:'POST',
-      headers:{'X-Operators-Key':key,'Content-Type':'application/json'},
-      body:JSON.stringify(operatorsTradePayload(trade))
-    });
-    if(response.status===401)throw new Error('The local database key is incorrect.');
-    if(!response.ok)throw new Error('Local database returned '+response.status+'.');
-    const record=await response.json();
+    const record=normalizeOperatorsRecord(await operatorsDatabaseRequest(
+      'create_trade',operatorsTradePayload(trade),key));
     trade.operatorsDbRecordId=record.id;
     trade.operatorsDbPending=false;
     return{saved:true,record:record};
@@ -9720,14 +9972,10 @@ async function updateTradeInOperatorsLocalDatabase(trade,providedKey){
   const key=providedKey||localStorage.getItem('operators_local_api_key');
   if(!key){trade.operatorsDbUpdatePending=true;return{saved:false,reason:'no-key'};}
   try{
-    const response=await fetch('http://127.0.0.1:5784/api/trades/'+encodeURIComponent(trade.operatorsDbRecordId),{
-      method:'PUT',
-      headers:{'X-Operators-Key':key,'Content-Type':'application/json'},
-      body:JSON.stringify(operatorsTradePayload(trade))
-    });
-    if(response.status===401)throw new Error('The local database key is incorrect.');
-    if(!response.ok)throw new Error('Local database returned '+response.status+'.');
-    const record=await response.json();
+    const record=normalizeOperatorsRecord(await operatorsDatabaseRequest('update_trade',{
+      recordId:trade.operatorsDbRecordId,
+      data:operatorsTradePayload(trade)
+    },key));
     trade.operatorsDbRecordId=record.id;
     trade.operatorsDbUpdatePending=false;
     return{saved:true,record:record};
@@ -9750,13 +9998,12 @@ async function deleteTradeFromOperatorsLocalDatabase(trade,providedKey){
   const key=providedKey||localStorage.getItem('operators_local_api_key');
   if(!key){queueOperatorsDatabaseDelete(trade.operatorsDbRecordId);return{deleted:false};}
   try{
-    const response=await fetch('http://127.0.0.1:5784/api/trades/'+encodeURIComponent(trade.operatorsDbRecordId),{
-      method:'DELETE',headers:{'X-Operators-Key':key}
-    });
-    if(response.status===401)throw new Error('The local database key is incorrect.');
-    if(!response.ok&&response.status!==404)throw new Error('Local database returned '+response.status+'.');
+    await operatorsDatabaseRequest('delete_trade',{
+      recordId:trade.operatorsDbRecordId
+    },key);
     return{deleted:true};
   }catch(error){
+    if(/not found/i.test(error.message||''))return{deleted:true,notFound:true};
     queueOperatorsDatabaseDelete(trade.operatorsDbRecordId);
     return{deleted:false,error:error};
   }
@@ -9793,25 +10040,25 @@ async function syncPendingOperatorsMutations(key){
   return{updated:updated,deleted:deleted};
 }
 
-async function connectOperatorsLocalDatabase(providedKey){
+async function connectOperatorsLocalDatabase(providedKey,preferredTransport){
   const input=document.getElementById('operators-local-key');
-  const status=document.getElementById('operators-local-status');
-  const entered=(input&&input.value||'').trim();
-  const masked=/^•+$/.test(entered);
-  const key=providedKey||(masked?localStorage.getItem('operators_local_api_key'):entered);
+  const deviceInput=document.getElementById('operators-relay-device');
+  const key=readOperatorsApiKey(providedKey);
+  const enteredDevice=(deviceInput&&deviceInput.value||'').trim();
+  if(enteredDevice)localStorage.setItem('operators_relay_device_id',readOperatorsRelayDeviceId(enteredDevice));
 
-  if(!key){operatorsLocalConnectionState='idle';if(status){status.textContent='Paste the API key copied from the desktop app.';status.style.color='#ff9aaf';}return;}
+  if(!key){operatorsLocalConnectionState='idle';setOperatorsDatabaseStatus('Paste the API key copied from the desktop app.','#ff9aaf');return;}
+  if(preferredTransport)operatorsDatabaseTransport=preferredTransport;
   operatorsLocalConnectionState='connecting';
-  if(status){status.textContent='Connecting to 127.0.0.1:5784…';status.style.color='#ffd27a';}
+  setOperatorsDatabaseStatus(
+    operatorsDatabaseTransport==='relay'?'Connecting through secure mobile relay…':'Connecting to the desktop database…',
+    '#ffd27a');
 
   try{
-    const response=await fetch('http://127.0.0.1:5784/api/trades',{
-      headers:{'X-Operators-Key':key},cache:'no-store'
-    });
-    if(response.status===401)throw new Error('The API key is incorrect.');
-    if(!response.ok)throw new Error('Local API returned '+response.status+'.');
-
-    const records=await response.json();
+    const responseRecords=await operatorsDatabaseRequest('get_trades',{},key);
+    const records=Array.isArray(responseRecords)
+      ?responseRecords.map(normalizeOperatorsRecord)
+      :[];
     const known=new Set(state.trades.map(function(t){return t.operatorsDbRecordId;}).filter(Boolean));
     let added=0;
     records.forEach(function(record){
@@ -9833,6 +10080,8 @@ async function connectOperatorsLocalDatabase(providedKey){
     });
 
     localStorage.setItem('operators_local_api_key',key);
+    if(input)input.value='';
+    if(deviceInput)deviceInput.value='';
     const synced=await syncPendingOperatorsTrades(key);
     const mutations=await syncPendingOperatorsMutations(key);
     await saveState();
@@ -9846,15 +10095,22 @@ async function connectOperatorsLocalDatabase(providedKey){
     renderPage();
   }catch(error){
     operatorsLocalConnectionState='error';
-    if(status){status.textContent=error.message||'Could not connect. Keep the desktop app open.';status.style.color='#ff9aaf';}
+    setOperatorsDatabaseStatus(error.message||'Could not connect. Keep the desktop app open.','#ff9aaf');
   }
 }
 
 function forgetOperatorsLocalDatabase(){
   operatorsLocalConnectionState='idle';
+  operatorsDatabaseTransport='unknown';
   localStorage.removeItem('operators_local_api_key');
+  localStorage.removeItem('operators_relay_device_id');
   const input=document.getElementById('operators-local-key');if(input)input.value='';
-  const status=document.getElementById('operators-local-status');if(status){status.textContent='Key removed from this browser.';status.style.color='#93a4bd';}
+  const deviceInput=document.getElementById('operators-relay-device');if(deviceInput)deviceInput.value='';
+  setOperatorsDatabaseStatus('Connection details removed from this browser.','#93a4bd');
+  if(operatorsRelayConnection){
+    operatorsRelayConnection.stop().catch(function(){});
+    operatorsRelayConnection=null;
+  }
 }
 
 function pageTrades(){
