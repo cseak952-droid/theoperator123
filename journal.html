@@ -9655,7 +9655,7 @@ const operatorsRelayPendingRequests=new Map();
 const operatorsTradeSyncInFlight=new Map();
 let operatorsTradeSubmitInProgress=false;
 const OPERATORS_PENDING_TRADES_STORAGE_KEY='operators_pending_trades_v1';
-const OPERATORS_RELAY_BUILD='2026.08.10.5';
+const OPERATORS_RELAY_BUILD='2026.08.10.6';
 
 function setOperatorsDatabaseStatus(message,color){
   const status=document.getElementById('operators-local-status');
@@ -9964,8 +9964,8 @@ function operatorsBrowserInstanceId(){
 
 function operatorsTradeClientId(trade){
   if(!trade.operatorsDbClientId){
-    const accountId=state.activeAccountId||'default';
-    trade.operatorsDbClientId='web-'+operatorsBrowserInstanceId()+'-'+accountId+'-'+trade.id;
+    const randomId=createOperatorsRequestId().replace(/-/g,'').toLowerCase();
+    trade.operatorsDbClientId='web-'+operatorsBrowserInstanceId()+'-'+randomId;
   }
   return trade.operatorsDbClientId;
 }
