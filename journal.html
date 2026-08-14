@@ -4734,7 +4734,6 @@ body:has(.blublu-fg) .nav-item-blublu.active{
 }
 </style>
 
-<script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@8.0.7/dist/browser/signalr.min.js"></script>
 
 </head>
 <body>
@@ -9645,17 +9644,29 @@ function pageDashboard(){
 }
 
 const OPERATORS_LOCAL_API_BASE='http://127.0.0.1:5784';
-const OPERATORS_RELAY_HUB_URL='https://operators-db-relay.onrender.com/relay';
+const OPERATORS_REMOTE_API_STORAGE_KEY='operators_cloudflare_api_base';
 const OPERATORS_DATABASE_REQUEST_TIMEOUT_MS=45000;
 let operatorsLocalConnectionState='idle';
 let operatorsDatabaseTransport='unknown';
-let operatorsRelayConnection=null;
-let operatorsRelayStartPromise=null;
-const operatorsRelayPendingRequests=new Map();
 const operatorsTradeSyncInFlight=new Map();
 let operatorsTradeSubmitInProgress=false;
 const OPERATORS_PENDING_TRADES_STORAGE_KEY='operators_pending_trades_v1';
-const OPERATORS_RELAY_BUILD='2026.08.10.6';
+const OPERATORS_DATABASE_BUILD='2026.08.14.1';
+
+function normalizeOperatorsRemoteApiBase(value){
+  const text=String(value||'').trim().replace(/\/+$/,'');
+  if(!text)return'';
+  let parsed;
+  try{parsed=new URL(text);}catch(error){throw new Error('Paste a valid Cloudflare HTTPS URL.');}
+  if(parsed.protocol!=='https:')throw new Error('The remote database URL must start with https://');
+  if(parsed.username||parsed.password||parsed.search||parsed.hash)throw new Error('Paste only the Cloudflare base URL.');
+  return parsed.origin+parsed.pathname.replace(/\/+$/,'');
+}
+
+function readOperatorsRemoteApiBase(providedBase){
+  const input=document.getElementById('operators-remote-url');
+  return normalizeOperatorsRemoteApiBase(providedBase||(input&&input.value)||localStorage.getItem(OPERATORS_REMOTE_API_STORAGE_KEY)||'');
+}
 
 function setOperatorsDatabaseStatus(message,color){
   const status=document.getElementById('operators-local-status');
@@ -9666,15 +9677,6 @@ function readOperatorsApiKey(providedKey){
   const input=document.getElementById('operators-local-key');
   const entered=(input&&input.value||'').trim();
   return providedKey||entered||localStorage.getItem('operators_local_api_key')||'';
-}
-
-function readOperatorsRelayDeviceId(providedDeviceId){
-  const input=document.getElementById('operators-relay-device');
-  const value=(providedDeviceId||(input&&input.value)||localStorage.getItem('operators_relay_device_id')||'').trim().toLowerCase();
-  if(value&&!/^[a-z0-9_-]{1,100}$/.test(value)){
-    throw new Error('The Mobile Connection Code is invalid. Copy it again from the desktop app.');
-  }
-  return value;
 }
 
 function createOperatorsRequestId(){
@@ -9691,120 +9693,9 @@ function parseOperatorsResponsePayload(payload){
   try{return JSON.parse(payload);}catch(error){return{value:payload};}
 }
 
-function rejectOperatorsRelayRequests(error){
-  operatorsRelayPendingRequests.forEach(function(pending){
-    clearTimeout(pending.timer);
-    pending.reject(error);
-  });
-  operatorsRelayPendingRequests.clear();
-}
-
-function buildOperatorsRelayConnection(){
-  if(!window.signalR||!window.signalR.HubConnectionBuilder){
-    throw new Error('The secure mobile relay client did not load. Check the internet connection and refresh.');
-  }
-
-  const connection=new window.signalR.HubConnectionBuilder()
-    .withUrl(OPERATORS_RELAY_HUB_URL)
-    .withAutomaticReconnect([0,2000,5000,10000,20000])
-    .build();
-
-  connection.on('DatabaseResponse',function(requestId,succeeded,payload){
-    const pending=operatorsRelayPendingRequests.get(requestId);
-    if(!pending)return;
-    operatorsRelayPendingRequests.delete(requestId);
-    clearTimeout(pending.timer);
-    const parsed=parseOperatorsResponsePayload(payload);
-    if(succeeded){pending.resolve(parsed);return;}
-    pending.reject(new Error(parsed&&parsed.error?parsed.error:'The desktop database rejected the request.'));
-  });
-
-  connection.onreconnecting(function(){
-    if(operatorsDatabaseTransport==='relay'){
-      operatorsLocalConnectionState='connecting';
-      setOperatorsDatabaseStatus('Secure mobile relay reconnecting…','#ffd27a');
-    }
-  });
-  connection.onreconnected(function(){
-    if(operatorsDatabaseTransport==='relay'){
-      operatorsLocalConnectionState='connected';
-      setOperatorsDatabaseStatus('Connected through secure mobile relay','#67e8b5');
-    }
-  });
-  connection.onclose(function(error){
-    rejectOperatorsRelayRequests(error||new Error('The secure mobile relay disconnected.'));
-    if(operatorsDatabaseTransport==='relay'){
-      operatorsLocalConnectionState='error';
-      setOperatorsDatabaseStatus('Secure mobile relay disconnected. Reconnect to continue.','#ff9aaf');
-    }
-  });
-  return connection;
-}
-
-async function ensureOperatorsRelayConnection(){
-  if(!operatorsRelayConnection)operatorsRelayConnection=buildOperatorsRelayConnection();
-  const hubStates=window.signalR.HubConnectionState||{};
-  const connectedState=hubStates.Connected||'Connected';
-  const connectingState=hubStates.Connecting||'Connecting';
-  const reconnectingState=hubStates.Reconnecting||'Reconnecting';
-  if(operatorsRelayConnection.state===connectedState)return operatorsRelayConnection;
-  if(operatorsRelayStartPromise)return operatorsRelayStartPromise;
-
-  if(operatorsRelayConnection.state===connectingState||operatorsRelayConnection.state===reconnectingState){
-    await new Promise(function(resolve,reject){
-      const startedAt=Date.now();
-      const timer=setInterval(function(){
-        if(operatorsRelayConnection&&operatorsRelayConnection.state===connectedState){
-          clearInterval(timer);resolve();
-        }else if(Date.now()-startedAt>30000){
-          clearInterval(timer);reject(new Error('The secure mobile relay could not reconnect.'));
-        }
-      },250);
-    });
-    return operatorsRelayConnection;
-  }
-
-  setOperatorsDatabaseStatus('Connecting to secure mobile relay…','#ffd27a');
-  operatorsRelayStartPromise=operatorsRelayConnection.start()
-    .then(function(){return operatorsRelayConnection;})
-    .finally(function(){operatorsRelayStartPromise=null;});
-  return operatorsRelayStartPromise;
-}
-
-async function operatorsRelayRequest(operation,data,options){
-  options=options||{};
-  const deviceId=readOperatorsRelayDeviceId(options.deviceId);
-  if(!deviceId)throw new Error('Paste the Mobile Connection Code copied from the desktop app.');
-  const key=options.skipAuth?'':readOperatorsApiKey(options.apiKey);
-  if(!options.skipAuth&&!key)throw new Error('Pair this browser with the desktop database first.');
-  const connection=await ensureOperatorsRelayConnection();
-  const requestId=createOperatorsRequestId();
-  const timeoutMs=options.timeoutMs||OPERATORS_DATABASE_REQUEST_TIMEOUT_MS;
-
-  return new Promise(function(resolve,reject){
-    const timer=setTimeout(function(){
-      operatorsRelayPendingRequests.delete(requestId);
-      reject(new Error('The desktop database did not respond. Keep it running and connected to the internet.'));
-    },timeoutMs);
-    operatorsRelayPendingRequests.set(requestId,{resolve:resolve,reject:reject,timer:timer});
-    connection.invoke(
-      'SendDatabaseRequest',
-      deviceId,
-      requestId,
-      operation,
-      JSON.stringify({apiKey:key,data:data||{}})
-    ).catch(function(error){
-      const pending=operatorsRelayPendingRequests.get(requestId);
-      if(!pending)return;
-      operatorsRelayPendingRequests.delete(requestId);
-      clearTimeout(timer);
-      reject(error);
-    });
-  });
-}
-
 async function operatorsLocalRequest(operation,data,options){
   options=options||{};
+  const apiBase=options.baseUrl||OPERATORS_LOCAL_API_BASE;
   let path='/api/health',method='GET',body;
   const headers={};
   if(operation==='pair'){path='/api/pair';method='POST';}
@@ -9824,7 +9715,7 @@ async function operatorsLocalRequest(operation,data,options){
   const timeoutMs=options.timeoutMs||(operation==='pair'?120000:8000);
   const timer=controller?setTimeout(function(){controller.abort();},timeoutMs):null;
   try{
-    const response=await fetch(OPERATORS_LOCAL_API_BASE+path,{
+    const response=await fetch(apiBase+path,{
       method:method,headers:headers,body:body,cache:'no-store',signal:controller?controller.signal:undefined
     });
     const text=response.status===204?'':await response.text();
@@ -9851,16 +9742,18 @@ async function operatorsLocalRequest(operation,data,options){
 }
 
 async function operatorsDatabaseRequest(operation,data,key){
-  if(operatorsDatabaseTransport==='relay'){
-    return operatorsRelayRequest(operation,data,{apiKey:key});
+  const remoteBase=readOperatorsRemoteApiBase();
+  if(operatorsDatabaseTransport==='remote'){
+    if(!remoteBase)throw new Error('Paste the Cloudflare URL from Operators Studio.');
+    return operatorsLocalRequest(operation,data,{apiKey:key,baseUrl:remoteBase,timeoutMs:OPERATORS_DATABASE_REQUEST_TIMEOUT_MS});
   }
   if(operatorsDatabaseTransport==='local'){
     try{
       return await operatorsLocalRequest(operation,data,{apiKey:key});
     }catch(localError){
-      if(!localError.operatorsNetworkError||!readOperatorsRelayDeviceId())throw localError;
-      const result=await operatorsRelayRequest(operation,data,{apiKey:key});
-      operatorsDatabaseTransport='relay';
+      if(!localError.operatorsNetworkError||!remoteBase)throw localError;
+      const result=await operatorsLocalRequest(operation,data,{apiKey:key,baseUrl:remoteBase,timeoutMs:OPERATORS_DATABASE_REQUEST_TIMEOUT_MS});
+      operatorsDatabaseTransport='remote';
       return result;
     }
   }
@@ -9871,9 +9764,9 @@ async function operatorsDatabaseRequest(operation,data,key){
     return result;
   }catch(localError){
     if(!localError.operatorsNetworkError)throw localError;
-    if(!readOperatorsRelayDeviceId())throw localError;
-    const result=await operatorsRelayRequest(operation,data,{apiKey:key});
-    operatorsDatabaseTransport='relay';
+    if(!remoteBase)throw localError;
+    const result=await operatorsLocalRequest(operation,data,{apiKey:key,baseUrl:remoteBase,timeoutMs:OPERATORS_DATABASE_REQUEST_TIMEOUT_MS});
+    operatorsDatabaseTransport='remote';
     return result;
   }
 }
@@ -9890,62 +9783,56 @@ function normalizeOperatorsRecord(record){
 
 function operatorsLocalConnectorHTML(){
   const hasKey=!!localStorage.getItem('operators_local_api_key');
-  const hasDeviceId=!!localStorage.getItem('operators_relay_device_id');
+  const savedRemoteBase=localStorage.getItem(OPERATORS_REMOTE_API_STORAGE_KEY)||'';
   const statusText=operatorsLocalConnectionState==='connected'
-    ?(operatorsDatabaseTransport==='relay'?'Connected through secure mobile relay':'Connected locally · trades synchronized')
+    ?(operatorsDatabaseTransport==='remote'?'Connected remotely through Cloudflare':'Connected locally - trades synchronized')
     :operatorsLocalConnectionState==='connecting'
-      ?'Connecting automatically…'
-      :(hasKey?(hasDeviceId?'Pairing saved · ready for local or mobile connection':'Key saved · reconnecting automatically'):'Desktop app must be running');
+      ?'Connecting automatically...'
+      :(hasKey?'API key saved - ready to connect':'Operators Studio must be running');
   return`<style>
-    .operators-local-db{margin:0 0 18px;padding:16px 18px;border:1px solid rgba(57,215,255,.22);border-radius:12px;background:linear-gradient(135deg,rgba(13,31,52,.92),rgba(20,14,45,.92));display:grid;grid-template-columns:minmax(220px,1fr) minmax(240px,1.3fr) auto auto auto;gap:10px;align-items:center}
+    .operators-local-db{margin:0 0 18px;padding:18px;border:1px solid rgba(57,215,255,.22);border-radius:12px;background:linear-gradient(135deg,rgba(13,31,52,.92),rgba(20,14,45,.92));display:grid;grid-template-columns:minmax(240px,.9fr) minmax(280px,1.25fr) auto;gap:14px;align-items:center}
     .operators-local-title{font-weight:800;color:#72e4ff;letter-spacing:.04em}.operators-local-sub{font-size:11px;color:var(--text-faint);margin-top:3px}
-    .operators-local-db input{width:100%;box-sizing:border-box}.operators-local-db input+input{margin-top:7px}.operators-local-status{font-size:11px;color:${hasKey?'#67e8b5':'#93a4bd'};margin-top:5px}
+    .operators-connection-note{margin-top:9px;padding:8px 10px;border-left:3px solid #67e8b5;background:rgba(103,232,181,.07);font-size:11px;color:#c5d3e6;line-height:1.45}
+    .operators-local-db input{width:100%;box-sizing:border-box}.operators-local-db input+input{margin-top:7px}.operators-local-status{font-size:11px;color:${hasKey?'#67e8b5':'#93a4bd'};margin-top:6px}.operators-local-actions{display:grid;gap:7px;min-width:170px}.operators-local-actions .btn{width:100%}
     @media(max-width:900px){.operators-local-db{grid-template-columns:1fr}.operators-local-db .btn{width:100%}}
   </style><div class="operators-local-db">
-    <div><div class="operators-local-title">OPERATORS LOCAL DATABASE</div><div class="operators-local-sub">Same-PC localhost with secure mobile relay fallback</div><div class="operators-local-sub">Build ${OPERATORS_RELAY_BUILD} Â· Offline queue ${readOperatorsPendingTradeQueue().length}</div></div>
-    <div><input id="operators-local-key" type="password" value="" placeholder="${hasKey?'Local API Key saved':'Paste Local API Key'}"><input id="operators-relay-device" type="password" value="" placeholder="${hasDeviceId?'Mobile Connection Code saved':'Paste Mobile Connection Code'}"><div id="operators-local-status" class="operators-local-status">${statusText}</div></div>
-    <button type="button" class="btn btn-gold" onclick="pairOperatorsLocalDatabase()">Pair Automatically</button>
-    <button type="button" class="btn" onclick="connectOperatorsLocalDatabase()">Connect & Load Trades</button>
-    <button type="button" class="btn" onclick="forgetOperatorsLocalDatabase()">Forget Key</button>
+    <div><div class="operators-local-title">THE OPERATORS DATABASE</div><div class="operators-local-sub">Private, local-first trade storage</div><div class="operators-connection-note"><b>Same PC:</b> leave the Cloudflare URL empty.<br><b>Another PC or phone:</b> start Remote Access in Operators Studio, then paste its HTTPS URL here.</div><div class="operators-local-sub">Build ${OPERATORS_DATABASE_BUILD} - Offline queue ${readOperatorsPendingTradeQueue().length}</div></div>
+    <div><input id="operators-local-key" type="password" value="" placeholder="${hasKey?'Project API Key saved':'Paste Project API Key'}"><input id="operators-remote-url" type="url" value="${savedRemoteBase}" placeholder="Optional: https://...trycloudflare.com"><div id="operators-local-status" class="operators-local-status">${statusText}</div></div>
+    <div class="operators-local-actions"><button type="button" class="btn btn-gold" onclick="pairOperatorsLocalDatabase()">Pair / Approve</button><button type="button" class="btn" onclick="connectOperatorsLocalDatabase()">Connect & Load Trades</button><button type="button" class="btn" onclick="forgetOperatorsLocalDatabase()">Forget Connection</button><button type="button" class="btn" onclick="navigate('dashboard')">Back to Dashboard</button></div>
   </div>`;
 }
 
 async function pairOperatorsLocalDatabase(){
   const input=document.getElementById('operators-local-key');
-  const deviceInput=document.getElementById('operators-relay-device');
-  setOperatorsDatabaseStatus('Looking for the desktop app on this device…','#ffd27a');
+  const remoteInput=document.getElementById('operators-remote-url');
+  setOperatorsDatabaseStatus('Looking for Operators Studio on this device...','#ffd27a');
 
   try{
     let result;
     let pairedTransport='local';
     try{
-      setOperatorsDatabaseStatus('Waiting for approval in the desktop app…','#ffd27a');
+      setOperatorsDatabaseStatus('Waiting for approval in Operators Studio...','#ffd27a');
       result=await operatorsLocalRequest('pair',{}, {timeoutMs:120000});
     }catch(localError){
       if(localError.status===403)throw new Error('Pairing was not approved in the desktop app.');
       if(localError.status===429)throw new Error('Please wait a moment before trying again.');
       if(!localError.operatorsNetworkError)throw localError;
 
-      const deviceId=readOperatorsRelayDeviceId();
-      if(!deviceId){
-        throw new Error('On mobile, paste the Mobile Connection Code copied from the desktop app.');
-      }
-      setOperatorsDatabaseStatus('Waiting for remote approval in the desktop app…','#ffd27a');
-      result=await operatorsRelayRequest('pair',{
-        origin:window.location.origin||'The Operators website'
-      },{skipAuth:true,deviceId:deviceId,timeoutMs:120000});
-      pairedTransport='relay';
+      const remoteBase=readOperatorsRemoteApiBase();
+      if(!remoteBase)throw new Error('Another device needs the Cloudflare URL from Operators Studio.');
+      localStorage.setItem(OPERATORS_REMOTE_API_STORAGE_KEY,remoteBase);
+      setOperatorsDatabaseStatus('Waiting for remote approval in Operators Studio...','#ffd27a');
+      result=await operatorsLocalRequest('pair',{}, {baseUrl:remoteBase,timeoutMs:120000});
+      pairedTransport='remote';
     }
 
     if(!result.apiKey)throw new Error('The desktop app did not return a pairing key.');
 
     localStorage.setItem('operators_local_api_key',result.apiKey);
-    const relayDeviceId=result.relayDeviceId||readOperatorsRelayDeviceId();
-    if(relayDeviceId)localStorage.setItem('operators_relay_device_id',relayDeviceId);
     if(input)input.value='';
-    if(deviceInput)deviceInput.value='';
+    if(remoteInput&&pairedTransport==='local')remoteInput.value='';
     operatorsDatabaseTransport=pairedTransport;
-    setOperatorsDatabaseStatus('Paired successfully · loading trades…','#67e8b5');
+    setOperatorsDatabaseStatus('Paired successfully - loading trades...','#67e8b5');
     await connectOperatorsLocalDatabase(result.apiKey,pairedTransport);
   }catch(error){
     operatorsLocalConnectionState='error';
@@ -10147,16 +10034,16 @@ async function syncPendingOperatorsMutations(key){
 
 async function connectOperatorsLocalDatabase(providedKey,preferredTransport){
   const input=document.getElementById('operators-local-key');
-  const deviceInput=document.getElementById('operators-relay-device');
+  const remoteInput=document.getElementById('operators-remote-url');
   const key=readOperatorsApiKey(providedKey);
-  const enteredDevice=(deviceInput&&deviceInput.value||'').trim();
-  if(enteredDevice)localStorage.setItem('operators_relay_device_id',readOperatorsRelayDeviceId(enteredDevice));
+  const enteredRemote=(remoteInput&&remoteInput.value||'').trim();
+  if(enteredRemote)localStorage.setItem(OPERATORS_REMOTE_API_STORAGE_KEY,normalizeOperatorsRemoteApiBase(enteredRemote));
 
   if(!key){operatorsLocalConnectionState='idle';setOperatorsDatabaseStatus('Paste the API key copied from the desktop app.','#ff9aaf');return;}
   if(preferredTransport)operatorsDatabaseTransport=preferredTransport;
   operatorsLocalConnectionState='connecting';
   setOperatorsDatabaseStatus(
-    operatorsDatabaseTransport==='relay'?'Connecting through secure mobile relay…':'Connecting to the desktop database…',
+    operatorsDatabaseTransport==='remote'?'Connecting through Cloudflare...':'Connecting to Operators Studio...',
     '#ffd27a');
 
   try{
@@ -10186,7 +10073,6 @@ async function connectOperatorsLocalDatabase(providedKey,preferredTransport){
 
     localStorage.setItem('operators_local_api_key',key);
     if(input)input.value='';
-    if(deviceInput)deviceInput.value='';
     const synced=await syncPendingOperatorsTrades(key);
     const mutations=await syncPendingOperatorsMutations(key);
     await saveState();
@@ -10208,14 +10094,10 @@ function forgetOperatorsLocalDatabase(){
   operatorsLocalConnectionState='idle';
   operatorsDatabaseTransport='unknown';
   localStorage.removeItem('operators_local_api_key');
-  localStorage.removeItem('operators_relay_device_id');
+  localStorage.removeItem(OPERATORS_REMOTE_API_STORAGE_KEY);
   const input=document.getElementById('operators-local-key');if(input)input.value='';
-  const deviceInput=document.getElementById('operators-relay-device');if(deviceInput)deviceInput.value='';
+  const remoteInput=document.getElementById('operators-remote-url');if(remoteInput)remoteInput.value='';
   setOperatorsDatabaseStatus('Connection details removed from this browser.','#93a4bd');
-  if(operatorsRelayConnection){
-    operatorsRelayConnection.stop().catch(function(){});
-    operatorsRelayConnection=null;
-  }
 }
 
 function pageTrades(){
