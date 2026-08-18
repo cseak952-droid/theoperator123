@@ -1296,6 +1296,7 @@ tbody tr:last-child td{border-bottom:none;}
 .trd-clickable-row{cursor:pointer;transition:background .15s ease;}
 .trd-clickable-row:hover{background:rgba(77,166,255,.05);}
 .trd-overlay{position:fixed;inset:0;background:rgba(2,5,10,.6);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);z-index:940;opacity:0;animation:trd-fade .22s ease forwards;}
+.trd-overlay,.trd-overlay *{-webkit-user-select:none;user-select:none;-webkit-user-drag:none;}
 @keyframes trd-fade{from{opacity:0;}to{opacity:1;}}
 .trd-drawer{
   position:fixed;top:0;right:0;bottom:0;width:min(480px,92vw);
@@ -1419,7 +1420,8 @@ tbody tr:last-child td{border-bottom:none;}
 .cap-log-empty{padding:24px 4px;text-align:center;color:var(--text-faint);font-size:12.5px;}
 
 /* ===== PROFILE SETTINGS MODAL (premium glass cards) ===== */
-.ps-modal{max-width:540px;}
+.ps-modal{max-width:540px;-webkit-user-select:none;user-select:none;-webkit-user-drag:none;}
+.ps-modal input,.ps-modal textarea{-webkit-user-select:text;user-select:text;}
 .ps-modal .shot-modal-head{margin-bottom:4px;}
 .ps-tabs{display:flex;gap:8px;margin:14px 0 4px;border-bottom:1px solid var(--border-soft);}
 .ps-tab{flex:1;display:flex;flex-direction:column;align-items:flex-start;gap:1px;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--text-faint);padding:10px 4px 12px;font-size:12.5px;font-weight:700;cursor:pointer;transition:color .15s ease,border-color .15s ease;}
@@ -4793,6 +4795,10 @@ body:has(.target-page) .main{
 .target-setup{padding:19px;border-style:dashed;background:linear-gradient(145deg,rgba(22,25,47,.88),rgba(10,14,27,.94))}
 .target-field input,.target-field select{border-color:rgba(139,124,199,.21);border-radius:10px;background:rgba(3,7,17,.68);transition:border-color .18s ease,box-shadow .18s ease,background .18s ease}
 .target-field input:focus,.target-field select:focus{border-color:rgba(100,224,183,.65);background:rgba(7,12,23,.92);box-shadow:0 0 0 3px rgba(52,211,157,.08)}
+#target-goal{-moz-appearance:textfield;padding-right:14px}
+#target-goal::-webkit-inner-spin-button,#target-goal::-webkit-outer-spin-button{-webkit-appearance:none;appearance:none;margin:0}
+input[id^="rc-"][type="number"]{-moz-appearance:textfield;padding-right:14px}
+input[id^="rc-"][type="number"]::-webkit-inner-spin-button,input[id^="rc-"][type="number"]::-webkit-outer-spin-button{-webkit-appearance:none;appearance:none;margin:0}
 .target-accounts{padding:20px}
 .target-accounts-head{margin-bottom:15px}.target-accounts-head h2,.funded-journey-head h2,.target-account-trades-head h2{font-family:'Sora',sans-serif;letter-spacing:-.02em}
 .target-account-list{grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:12px}
@@ -4972,6 +4978,7 @@ body:has(.flex-page) .main{background:transparent}
 #screen-app .nav-item.active::before,#screen-app .network-item.active::before{content:"";position:absolute;right:10px;top:10px;width:3px;height:3px;border-radius:50%;background:var(--journal-cyan);box-shadow:0 0 8px rgba(0,229,255,.7);opacity:.7}
 #screen-app .sidebar-footer{opacity:.78;letter-spacing:.08em}
 #screen-app .database-danger-toast{border-radius:14px 14px 14px 6px}
+#operators-db-danger,#operators-db-danger *{-webkit-user-select:none;user-select:none;-webkit-user-drag:none}
 #screen-app .page>*{animation:journalHumanIn .28s ease both}
 #screen-app .page>*:nth-child(2){animation-delay:.025s}#screen-app .page>*:nth-child(3){animation-delay:.05s}#screen-app .page>*:nth-child(4){animation-delay:.075s}
 @keyframes journalHumanIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
@@ -5309,6 +5316,34 @@ window.storage = {
   }
 };
 
+/* The standalone journal uses browser storage only until the authenticated
+   parent page installs the Operators Database bridge. No API key or database
+   address is exposed in the journal UI. */
+const _operatorsBrowserStorePrefix='operators-journal-fallback::';
+window.storage={
+  async get(key){
+    const value=localStorage.getItem(_operatorsBrowserStorePrefix+key);
+    return value===null?null:{key:key,value:JSON.parse(value)};
+  },
+  async set(key,value){
+    localStorage.setItem(_operatorsBrowserStorePrefix+key,JSON.stringify(value));
+    return{key:key,value:value};
+  },
+  async delete(key){
+    localStorage.removeItem(_operatorsBrowserStorePrefix+key);
+    return{key:key,deleted:true};
+  },
+  async list(prefix){
+    const wanted=prefix||'',keys=[];
+    for(let i=0;i<localStorage.length;i++){
+      const storedKey=localStorage.key(i)||'';
+      if(storedKey.startsWith(_operatorsBrowserStorePrefix+wanted))
+        keys.push(storedKey.slice(_operatorsBrowserStorePrefix.length));
+    }
+    return{keys:keys,prefix:wanted};
+  }
+};
+
 /* ============================================================
    THEME SYSTEM
    ============================================================ */
@@ -5555,7 +5590,6 @@ const PAGES=[
   {id:'summaries',label:'Summaries',icon:'pie'},
   {id:'riskcalc',label:'Risk Calculator',icon:'calc'},
   {id:'blubluai',label:'Blublu AI',icon:'blubluai'},
-  {id:'settings',label:'Settings',icon:'settings'},
 ];
 const ICONS={
   grid:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>',
@@ -5581,6 +5615,7 @@ function defaultTargetPlan(){
 function freshAccount(id){return{id:id,name:'ID '+id,startingBalance:100000,trades:[],nextId:1,capitalLog:[],riskLimitPct:2,maxLotSize:1,targetPlan:defaultTargetPlan()};}
 function defaultAccounts(){const a=[];for(let i=1;i<=10;i++)a.push(freshAccount(i));return a;}
 let state={accounts:defaultAccounts(),activeAccountId:1,startingBalance:100000,riskLimitPct:2,maxLotSize:1,trades:[],nextId:1,dashboard:{market:'Forex',widgets:DEFAULT_WIDGET_IDS.slice()},flex:null,profile:{username:'',avatarDataUrl:'',soundOn:true},achievements:{profilePublic:true,items:{},publishedIds:[],lastSeenLeagueId:null,lastSeenScore:null,scoreLog:[]},blubluVision:{datasetSize:0,modelStatus:'Collecting Data',lastTraining:null,lastAnalysis:null,history:[]}};
+const DEFAULT_JOURNAL_STATE_JSON=JSON.stringify(state);
 
 /* ===== PUBLIC TRADER REPUTATION (Achievement privacy + community sharing) =====
    Every unlocked badge, League promotion, Perfect Week / Risk Sentinel tier,
@@ -5638,7 +5673,7 @@ function ensureFlexState(){
   FLEX_SECTIONS.forEach(function(s){if(state.flex.sections[s.key]===undefined)state.flex.sections[s.key]=true;});
   FLEX_METRICS.forEach(function(m){if(state.flex.visibility[m.key]===undefined)state.flex.visibility[m.key]=true;});
 }
-function isAdminUser(){return loggedInUser===DEMO_CREDS.email;}
+function isAdminUser(){return window.__operatorsUser?.role==='owner';}
 function flexKey(email){return 'flex_sub:'+String(email||'').trim().toLowerCase();}
 
 /* ===== FLEX PROFILE ANALYTICS ===== */
@@ -5729,7 +5764,7 @@ async function renderFlexAnalyticsPanel(){
 }
 
 let currentPage=new URLSearchParams(location.search).get('page')||'dashboard';
-if(!PAGES.some(p=>p.id===currentPage)&&!['flex','legendwall','profile'].includes(currentPage))currentPage='calendar';
+if(!PAGES.some(p=>p.id===currentPage)&&!['flex','legendwall','profile'].includes(currentPage))currentPage='dashboard';
 let calView={year:new Date().getFullYear(),month:new Date().getMonth()};
 const SESSIONS=['Asia','London','NY'];
 const TP_CURRENCIES=['USD','EUR','GBP','JPY','AUD','CAD','CHF','NZD','INR'];
@@ -5762,13 +5797,18 @@ async function loadState(){
   let oldSchemaDetected=false;
   try{
     let serialized=null;
-    if(String(window.name||'').startsWith('operatorsTargetBridge:')){
+    if(window.__operatorsAuthenticatedStorage){
+      state=JSON.parse(DEFAULT_JOURNAL_STATE_JSON);
+      const authenticatedRow=await window.storage.get('aurum_journal_data');
+      serialized=authenticatedRow&&authenticatedRow.value?authenticatedRow.value:null;
+    }
+    if(!window.__operatorsAuthenticatedStorage&&String(window.name||'').startsWith('operatorsTargetBridge:')){
       serialized=String(window.name).slice('operatorsTargetBridge:'.length);
       window.name='';
       if(serialized)localStorage.setItem(OPERATORS_JOURNAL_LOCAL_STORAGE_KEY,serialized);
     }
-    if(!serialized)serialized=localStorage.getItem(OPERATORS_JOURNAL_LOCAL_STORAGE_KEY);
-    if(!serialized){
+    if(!window.__operatorsAuthenticatedStorage&&!serialized)serialized=localStorage.getItem(OPERATORS_JOURNAL_LOCAL_STORAGE_KEY);
+    if(!window.__operatorsAuthenticatedStorage&&!serialized){
       const r=await window.storage.get('aurum_journal_data');
       serialized=r&&r.value?r.value:null;
     }
@@ -5825,7 +5865,9 @@ async function loadState(){
 async function saveState(){
   syncActiveAccountFromState();
   const serialized=JSON.stringify(state);
-  try{localStorage.setItem(OPERATORS_JOURNAL_LOCAL_STORAGE_KEY,serialized);}catch(e){console.error(e);}
+  if(!window.__operatorsAuthenticatedStorage){
+    try{localStorage.setItem(OPERATORS_JOURNAL_LOCAL_STORAGE_KEY,serialized);}catch(e){console.error(e);}
+  }
   try{await window.storage.set('aurum_journal_data',serialized);}catch(e){console.error(e);}
 }
 
@@ -6083,7 +6125,6 @@ function openProfileSettings(){
   overlay.onclick=function(e){if(e.target===overlay)closeProfileSettings();};
   const av=getAvatarDataUrl();
   const initial=((loggedInUser||'T').charAt(0)||'T').toUpperCase();
-  const tp=getTradingPrefs();
   const fp=getFlexPrivacy();
   const pe=getProfileExtra();
   const isProfileTab=psActiveTab==='profile';
@@ -6124,21 +6165,6 @@ function openProfileSettings(){
       '</div>';
 
   const tradingTabHtml=
-      '<div class="ps-section">'+
-        '<div class="ps-card-head"><span class="ps-card-icon">📊</span><div class="ps-card-head-text"><span class="ps-section-t">Market Preferences</span><span class="ps-card-d">Defaults applied across your trading journal</span></div></div>'+
-        '<div class="ps-grid-2">'+
-          '<div><label class="ps-field-label">Default Risk Per Trade (%)</label><input type="number" step="0.1" min="0.1" max="100" class="lg-input ps-input" value="'+tp.riskPerTrade+'" onchange="saveTradingPref(\'riskPerTrade\',parseFloat(this.value)||0)"></div>'+
-          '<div><label class="ps-field-label">Account Currency</label><select class="lg-input ps-input" onchange="saveTradingPref(\'currency\',this.value)">'+TP_CURRENCIES.map(function(c){return '<option value="'+c+'" '+(tp.currency===c?'selected':'')+'>'+c+'</option>';}).join('')+'</select></div>'+
-          '<div><label class="ps-field-label">Time Zone</label><select class="lg-input ps-input" onchange="saveTradingPref(\'timezone\',this.value)">'+TP_TIMEZONES.map(function(z){return '<option value="'+z.v+'" '+(tp.timezone===z.v?'selected':'')+'>'+z.l+'</option>';}).join('')+'</select></div>'+
-          '<div><label class="ps-field-label">Default Market</label><input type="text" class="lg-input ps-input" list="tp-market-list" value="'+esc(tp.market)+'" onchange="saveTradingPref(\'market\',this.value.toUpperCase())"><datalist id="tp-market-list">'+TP_MARKETS.map(function(m){return '<option value="'+m+'">';}).join('')+'</datalist></div>'+
-          '<div><label class="ps-field-label">Default R-Multiple Display</label><select class="lg-input ps-input" onchange="saveTradingPref(\'rDisplay\',this.value)">'+TP_R_DISPLAY.map(function(o){return '<option value="'+o+'" '+(tp.rDisplay===o?'selected':'')+'>'+o+'</option>';}).join('')+'</select></div>'+
-          '<div><label class="ps-field-label">Default Position Size Method</label><select class="lg-input ps-input" onchange="saveTradingPref(\'sizeMethod\',this.value)">'+TP_SIZE_METHODS.map(function(o){return '<option value="'+o+'" '+(tp.sizeMethod===o?'selected':'')+'>'+o+'</option>';}).join('')+'</select></div>'+
-        '</div>'+
-        '<div class="ps-divider"></div>'+
-        '<div class="ps-subhead">Preferred Trading Sessions</div>'+
-        '<div class="ps-chip-row">'+SESSIONS.map(function(s){return '<button type="button" class="ps-chip'+(tp.sessions.indexOf(s)>-1?' active':'')+'" id="tp-chip-'+s+'" onclick="toggleTradingSession(\''+s+'\')">'+s+'</button>';}).join('')+'</div>'+
-      '</div>'+
-
       '<div class="ps-section">'+
         '<div class="ps-card-head"><span class="ps-card-icon">🔔</span><div class="ps-card-head-text"><span class="ps-section-t">Notifications</span><span class="ps-card-d">Control in-app alerts</span></div></div>'+
         '<div class="ps-toggle-row">'+
@@ -6194,7 +6220,7 @@ function openProfileSettings(){
       '<div class="acct-modal-sub">Personal profile information is kept separate from platform &amp; trading configuration.</div>'+
       '<div class="ps-tabs">'+
         '<button type="button" class="ps-tab'+(isProfileTab?' active':'')+'" onclick="switchPsTab(\'profile\')"><span class="ps-tab-ic">👤</span>Profile Settings<span class="ps-tab-sub">Photo, bio, socials</span></button>'+
-        '<button type="button" class="ps-tab'+(isProfileTab?'':' active')+'" onclick="switchPsTab(\'trading\')"><span class="ps-tab-ic">📈</span>Trading Preferences<span class="ps-tab-sub">Risk, market, privacy</span></button>'+
+        '<button type="button" class="ps-tab'+(isProfileTab?'':' active')+'" onclick="switchPsTab(\'trading\')"><span class="ps-tab-ic">📈</span>Trading Preferences<span class="ps-tab-sub">Notifications, privacy, appearance</span></button>'+
       '</div>'+
       '<div class="ps-body">'+(isProfileTab?profileTabHtml:tradingTabHtml)+'</div>'+
     '</div>';
@@ -6455,9 +6481,9 @@ function renderTopbar(){
   const acc=getActiveAccount();
   const tc=document.getElementById('topbar-content');
   if(!tc)return;
-  // Login/logout removed — Dashboard is the permanent landing page, so the topbar
-  // no longer needs a sign-out control here.
-  tc.innerHTML='';
+  tc.innerHTML=window.__operatorsAuthenticatedStorage
+    ? '<button type="button" class="btn" onclick="window.parent.postMessage({type:\'operators-sign-out\'},\'*\')">Sign out</button>'
+    : '';
   applyTheme(currentTheme);
 }
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
@@ -6477,7 +6503,6 @@ function renderPage(){
     else if(currentPage==='summaries')el.innerHTML=pageSummaries();
     else if(currentPage==='riskcalc')el.innerHTML=pageRiskCalc();
     else if(currentPage==='blubluai'){el.innerHTML=pageBlubluAI();initBlubluAIPage();}
-    else if(currentPage==='settings')el.innerHTML=pageSettings();
     else if(currentPage==='flex'){el.innerHTML=pageFlex();initFlexPage();}
     else if(currentPage==='legendwall'){el.innerHTML=pageLegendWall();initLegendWallPage();}
     else if(currentPage==='profile')el.innerHTML=pageProfile();
@@ -10138,23 +10163,9 @@ function operatorsLocalConnectorHTML(){
   </div>`;
 }
 
-function pageSettings(){
-  return`<div class="panel" style="padding:22px;margin-bottom:18px"><div class="section-title">Settings</div><div style="color:var(--text-muted);margin-top:5px">Manage this browser's connection to The Operators Database.</div></div>${operatorsLocalConnectorHTML()}`;
-}
-
 function renderDatabaseDangerPopup(){
   const existing=document.getElementById('operators-db-danger');
-  if(operatorsLocalConnectionState==='connected'){
-    if(existing)existing.remove();
-    return;
-  }
-  if(existing)return;
-  const popup=document.createElement('div');
-  popup.id='operators-db-danger';
-  popup.setAttribute('role','alert');
-  popup.style.cssText='position:fixed;right:22px;bottom:22px;z-index:10050;max-width:390px;padding:15px 16px;border:1px solid rgba(255,74,101,.72);border-radius:12px;background:linear-gradient(135deg,rgba(72,8,23,.97),rgba(31,8,22,.98));box-shadow:0 18px 45px rgba(0,0,0,.48),0 0 28px rgba(255,74,101,.18);color:#fff;display:flex;align-items:center;gap:13px';
-  popup.innerHTML='<div style="width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:rgba(255,74,101,.18);color:#ff7188;font-size:20px;font-weight:900;flex:0 0 auto">!</div><div style="min-width:0;flex:1"><div style="font-weight:800;color:#ff8da0">Database not connected</div><div style="font-size:12px;color:#ffd5dc;margin-top:3px">Please connect it.</div></div><button type="button" class="btn" style="white-space:nowrap;border-color:rgba(255,113,136,.55);color:#fff" onclick="navigate(\'settings\')">Connect</button>';
-  document.body.appendChild(popup);
+  if(existing)existing.remove();
 }
 
 async function pairOperatorsLocalDatabase(){
@@ -10547,7 +10558,7 @@ function openJournalSelect(select,button){
 }
 function syncJournalSelect(select,button){const option=select.options[select.selectedIndex];button.querySelector('span').textContent=option?option.textContent:'Choose';button.title=option?option.textContent:'';}
 function enhanceJournalSelects(root){
-  (root||document).querySelectorAll('#trade-form select:not([data-journal-select]),#edit-trade-form select:not([data-journal-select])').forEach(function(select){
+  (root||document).querySelectorAll('#trade-form select:not([data-journal-select]),#edit-trade-form select:not([data-journal-select]),#rc-instrument:not([data-journal-select])').forEach(function(select){
     select.dataset.journalSelect='true';const shell=document.createElement('div');shell.className='journal-select-shell';select.parentNode.insertBefore(shell,select);shell.appendChild(select);select.classList.add('journal-native-select');
     const button=document.createElement('button');button.type='button';button.className='journal-select-button';button.setAttribute('aria-haspopup','listbox');button.setAttribute('aria-expanded','false');button.innerHTML='<span></span><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m5 7 5 5 5-5"/></svg>';shell.appendChild(button);syncJournalSelect(select,button);
     button.addEventListener('click',function(){openJournalSelect(select,button);});button.addEventListener('keydown',function(e){if(e.key==='ArrowDown'||e.key==='Enter'||e.key===' '){e.preventDefault();openJournalSelect(select,button);}});select.addEventListener('change',function(){syncJournalSelect(select,button);});
@@ -10657,33 +10668,21 @@ async function addTradeFromForm(e){
   const targetAccountId=document.getElementById('f-target-account')?.value||'',targetAccount=(targetPlan().targetAccounts||[]).find(a=>a.id===targetAccountId);
   const trade={id,date:document.getElementById('f-date').value,side:document.getElementById('f-side').value,pair:(document.getElementById('f-pair').value||'XAUUSD').toUpperCase().trim(),strategy:(document.getElementById('f-strategy').value||'').trim(),lot:lotVal,entry:document.getElementById('f-entry').value,exit:document.getElementById('f-exit').value,sl:document.getElementById('f-sl').value,tp:document.getElementById('f-tp').value,session:document.getElementById('f-session').value,quality:document.getElementById('f-quality').value,notes:document.getElementById('f-notes').value,shotCount:pendingShots.length,oversized:lotVal>(state.maxLotSize||1),targetAccountId:targetAccountId,targetPhase:targetAccount?(targetAccount.type==='funded'?targetAccount.currentStage:'live'):''};
   Object.assign(trade,readTradePsychologyFlags('f'));
-  trade.operatorsDbPending=true;
-  operatorsTradeClientId(trade);
-  queueOperatorsPendingTrade(trade);
   state.trades.push(trade);
   if(pendingShots.length>0){
     try{await window.storage.set(shotsKey(id),JSON.stringify(pendingShots));}catch(err){console.error(err);}
   }
   pendingShots=[];
   await saveState();
-  showToast('Trade saved locally; synchronizing with Operators Database');
+  showToast('Trade saved');
   renderPage();
-  try{
-    const databaseResult=await saveTradeToOperatorsLocalDatabase(trade);
-    await saveState();
-    showToast(databaseResult.saved?'Trade saved to Operators Database':'Trade saved locally; database sync pending');
-  }finally{
-    operatorsTradeSubmitInProgress=false;
-  }
+  operatorsTradeSubmitInProgress=false;
 }
 async function deleteTrade(id){
-  const trade=state.trades.find(t=>t.id===id);
-  const databaseResult=await deleteTradeFromOperatorsLocalDatabase(trade);
-  removeOperatorsPendingTrade(trade);
   state.trades=state.trades.filter(t=>t.id!==id);
   await saveState();
   try{await window.storage.delete(shotsKey(id));}catch(e){}
-  showToast(databaseResult.deleted?'Trade #'+id+' removed from Operators Database':'Trade removed locally · database deletion pending');renderPage();
+  showToast('Trade #'+id+' deleted');renderPage();
 }
 async function duplicateTrade(id){
   const src=state.trades.find(x=>x.id===id);
@@ -11887,7 +11886,7 @@ function openTargetTradeModal(iso){targetSelectedDate=iso;targetTradeSide='BUY';
 function setTargetSide(side){targetTradeSide=side;document.getElementById('target-buy').className=side==='BUY'?'active buy':'buy';document.getElementById('target-sell').className=side==='SELL'?'active sell':'sell';updateTargetPnlPreview();}
 function targetModalPnl(){const e=Number(document.getElementById('target-entry')?.value),x=Number(document.getElementById('target-exit')?.value),l=Number(document.getElementById('target-lot')?.value);if(!e||!x||!l)return null;const usd=((x-e)*(targetTradeSide==='BUY'?1:-1)/PIP)*l*100,p=targetPlan();return p.currency==='INR'?usd*Number(p.usdInrRate||83):usd;}
 function updateTargetPnlPreview(){const v=targetModalPnl(),el=document.getElementById('target-pnl-preview');if(!el)return;el.textContent=v==null?'—':targetMoney(v,true);el.className='target-pnl-preview '+(v>=0?'target-positive':'target-negative');}
-async function saveTargetTrade(iso){const entry=Number(document.getElementById('target-entry').value),exit=Number(document.getElementById('target-exit').value),lot=Number(document.getElementById('target-lot').value);if(!entry||!exit||!lot){showToast('Enter Entry, Exit and Lot');return;}const p=targetPlan(),account=targetActiveAccount(),trade={id:state.nextId++,date:iso,targetSessionDate:iso,targetSessionStart:p.sessionStart,targetSessionEnd:p.sessionEnd,targetTimeZone:'Asia/Kolkata',side:targetTradeSide,pair:'XAUUSD',strategy:'Target Calendar',lot,entry,exit,sl:'',tp:'',session:'Exness Forex',quality:'A',notes:'Added from Trading Calendar',slRemoved:false,ruleBroken:false,oversized:lot>(state.maxLotSize||1),targetAccountId:account?.id||null,targetPhase:account?.type==='funded'?(account.currentStage||'phase1'):'live',targetExchangeRate:p.usdInrRate,targetExchangeRateTimestamp:p.exchangeRateTimestamp,operatorsDbPending:true};operatorsTradeClientId(trade);queueOperatorsPendingTrade(trade);state.trades.push(trade);await saveState();document.getElementById('target-trade-modal')?.remove();showToast('Trade saved locally; synchronizing');renderPage();try{const res=await saveTradeToOperatorsLocalDatabase(trade);await saveState();showToast(res.saved?'Trade saved to Operators Database':'Trade saved locally; database sync pending');}catch(e){showToast('Trade saved locally; database sync pending');}}
+async function saveTargetTrade(iso){const entry=Number(document.getElementById('target-entry').value),exit=Number(document.getElementById('target-exit').value),lot=Number(document.getElementById('target-lot').value);if(!entry||!exit||!lot){showToast('Enter Entry, Exit and Lot');return;}const p=targetPlan(),account=targetActiveAccount(),trade={id:state.nextId++,date:iso,targetSessionDate:iso,targetSessionStart:p.sessionStart,targetSessionEnd:p.sessionEnd,targetTimeZone:'Asia/Kolkata',side:targetTradeSide,pair:'XAUUSD',strategy:'Target Calendar',lot,entry,exit,sl:'',tp:'',session:'Exness Forex',quality:'A',notes:'Added from Trading Calendar',slRemoved:false,ruleBroken:false,oversized:lot>(state.maxLotSize||1),targetAccountId:account?.id||null,targetPhase:account?.type==='funded'?(account.currentStage||'phase1'):'live',targetExchangeRate:p.usdInrRate,targetExchangeRateTimestamp:p.exchangeRateTimestamp};state.trades.push(trade);await saveState();document.getElementById('target-trade-modal')?.remove();showToast('Trade saved');renderPage();}
 
 function pageCalendar(){
   const trades=computedTrades();const{year,month}=calView;
@@ -18208,10 +18207,6 @@ function drawDashboardCharts(){
 }
 
 function attachPageHandlers(){
-  if(localStorage.getItem('operators_local_api_key')&&operatorsLocalConnectionState==='idle'){
-    operatorsLocalConnectionState='connecting';
-    setTimeout(function(){connectOperatorsLocalDatabase();},0);
-  }
   var form=document.getElementById('trade-form');
   if(form) form.addEventListener('submit',addTradeFromForm);
   var shotInput=document.getElementById('f-screenshots');

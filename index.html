@@ -1422,13 +1422,6 @@ function closeMobileMenu(){
     <h1 id="cardTitle">Sign in to The Operators</h1>
     <p class="sub" id="cardSub">Welcome back! Please sign in to continue</p>
 
-    <button class="btn-google" type="button" onclick="fakeGoogle()">
-      <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.9c1.7-1.57 2.7-3.88 2.7-6.62z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.9-2.26c-.8.54-1.84.86-3.06.86-2.35 0-4.34-1.59-5.05-3.72H.98v2.33A9 9 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.95 10.7A5.4 5.4 0 0 1 3.66 9c0-.59.1-1.17.29-1.7V4.97H.98A9 9 0 0 0 0 9c0 1.45.35 2.83.98 4.03l2.97-2.33z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.51.46 3.44 1.35l2.58-2.58C13.46.89 11.43 0 9 0A9 9 0 0 0 .98 4.97l2.97 2.33C4.66 5.17 6.65 3.58 9 3.58z"/></svg>
-      Continue with Google
-    </button>
-
-    <div class="divider">or</div>
-
     <form id="authForm" novalidate>
       <div class="field" id="nameField" style="display:none;">
         <label for="fullName">Full name</label>
@@ -1493,7 +1486,57 @@ function showHome(){
   window.scrollTo(0,0);
 }
 
+async function signOutOperatorsUser(){
+  const session=readOperatorsSession();
+  try{
+    if(session?.token) await operatorsAuthRequest('/api/auth/logout',{
+      method:'POST',headers:{Authorization:'Bearer '+session.token}
+    });
+  }catch{}
+  clearOperatorsSession();
+  journalLoaded=false;
+  const frame=document.getElementById('journalFrame');
+  if(frame)frame.src='about:blank';
+  showAuth();
+  showToast('Signed out safely.');
+}
+
+window.addEventListener('message',function(event){
+  if(event.source===document.getElementById('journalFrame')&&event.data?.type==='operators-sign-out'){
+    signOutOperatorsUser();
+  }
+});
+
 let journalLoaded = false;
+const OPERATORS_AUTH_STORAGE_KEY = 'operators_journal_session';
+const OPERATORS_DATABASE_URL = ['127.0.0.1','localhost',''].includes(window.location.hostname)
+  ? 'http://127.0.0.1:5784'
+  : 'https://gdp-classes-boxed-letters.trycloudflare.com';
+
+function readOperatorsSession(){
+  try{return JSON.parse(localStorage.getItem(OPERATORS_AUTH_STORAGE_KEY)||'null');}
+  catch{return null;}
+}
+function saveOperatorsSession(session){
+  localStorage.setItem(OPERATORS_AUTH_STORAGE_KEY,JSON.stringify(session));
+}
+function clearOperatorsSession(){
+  localStorage.removeItem(OPERATORS_AUTH_STORAGE_KEY);
+}
+
+async function operatorsAuthRequest(path,options){
+  const response=await fetch(OPERATORS_DATABASE_URL+path,Object.assign({
+    headers:{'Content-Type':'application/json'}
+  },options||{}));
+  let body=null;
+  try{body=await response.json();}catch{}
+  if(!response.ok){
+    const error=new Error(body?.message||'Could not connect to The Operators Database.');
+    error.status=response.status;
+    throw error;
+  }
+  return body;
+}
 function getRequestedFlexSlug(){
   const searchSlug = new URLSearchParams(window.location.search).get('flex');
   if(searchSlug) return searchSlug;
@@ -1504,21 +1547,32 @@ function getRequestedFlexSlug(){
 }
 async function connectJournalFrame(frame){
   try{
-    const { data } = await supabaseClient.auth.getSession();
-    frame.contentWindow.__OPERATORS_SUPABASE = window.operatorsSupabase;
-    frame.contentWindow.__OPERATORS_SESSION = data?.session || null;
+    const session=readOperatorsSession();
+    if(!session?.token) throw new Error('Please sign in.');
+    const verified=await operatorsAuthRequest('/api/auth/session',{
+      method:'GET',
+      headers:{Authorization:'Bearer '+session.token}
+    });
+    saveOperatorsSession(verified);
+    frame.contentWindow.__OPERATORS_API_BASE = OPERATORS_DATABASE_URL;
+    frame.contentWindow.__OPERATORS_SESSION = verified;
     frame.contentWindow.__OPERATORS_PUBLIC_SLUG = getRequestedFlexSlug();
     frame.contentWindow.__OPERATORS_PARENT_URL = window.location.origin + window.location.pathname;
     await frame.contentWindow.eval(window.OPERATORS_BRIDGE_SOURCE);
     const loading = document.getElementById('operatorsAppLoading');
     if(loading) loading.style.display = 'none';
   }catch(error){
-    console.error('Could not connect the journal to Supabase:', error);
-    const loading = document.getElementById('operatorsAppLoading');
-    if(loading) loading.innerHTML = '<strong style="color:#ff8092;letter-spacing:.03em;">FLEX PAGE COULD NOT LOAD</strong><button type="button" onclick="location.reload()" style="padding:10px 18px;border:1px solid #43bdff;border-radius:9px;background:#0d2740;color:#fff;cursor:pointer;">Retry</button>';
+    console.error('Could not connect the journal:', error);
+    clearOperatorsSession();
+    journalLoaded=false;
+    document.getElementById('page-app').style.display='none';
+    showAuth();
+    errorMsg.textContent=error?.message||'Please sign in again.';
+    errorMsg.classList.add('show');
   }
 }
 async function showApp(){
+  if(!readOperatorsSession()?.token){showAuth();return;}
   document.getElementById('page-home').style.display = 'none';
   document.getElementById('page-auth').style.display = 'none';
   document.getElementById('page-app').style.display = 'block';
@@ -1527,31 +1581,15 @@ async function showApp(){
     const frame = document.getElementById('journalFrame');
     frame.addEventListener('load', function(){ connectJournalFrame(frame); }, { once:true });
     // Versioned URL prevents GitHub Pages/browser cache from serving an older journal UI.
-    let journalUrl = 'journal.html?v=20260814-database-settings-2&cache=' + Date.now();
-    if(!getRequestedFlexSlug()){
-      try{
-        const authResult = await supabaseClient.auth.getSession();
-        const ownerEmail = authResult.data && authResult.data.session && authResult.data.session.user
-          ? authResult.data.session.user.email
-          : '';
-        if(ownerEmail) journalUrl += '&owner=' + encodeURIComponent(ownerEmail);
-      }catch(error){
-        console.warn('Could not prepare the account-specific journal URL:', error);
-      }
-    }
+    const activeSession=readOperatorsSession();
+    let journalUrl = 'journal.html?v=20260818-operators-auth&cache=' + Date.now();
+    if(activeSession?.user?.email) journalUrl += '&owner=' + encodeURIComponent(activeSession.user.email);
     frame.src = journalUrl;
     journalLoaded = true;
   }
 }
 </script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-const SUPABASE_URL = "https://wjzxjhoclfshxeealacq.supabase.co";
-const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_fKU1je4wKZKtldnvuZmiOQ_JpDrHjyj";
-const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
-window.operatorsSupabase = supabaseClient;
-console.log("Supabase initialized");
-
 window.OPERATORS_BRIDGE_SOURCE = String.raw`
 (async function(){
   if(window.__operatorsBridgeInstalled) return;
@@ -2290,6 +2328,64 @@ window.OPERATORS_BRIDGE_SOURCE = String.raw`
   }
 })();
 `;
+window.OPERATORS_BRIDGE_SOURCE = String.raw`
+(async function(){
+  window.__operatorsBridgeInstalled = true;
+  var apiBase = window.__OPERATORS_API_BASE;
+  var session = window.__OPERATORS_SESSION;
+  var token = session && session.token;
+  if(!apiBase || !token) throw new Error('A valid Operators Database session is required.');
+
+  window.loggedInUser = (session.user && session.user.email) || 'journal-user';
+  window.__operatorsUser = session.user || null;
+  window.__operatorsAuthenticatedStorage = true;
+
+  async function request(path, options){
+    var settings = options || {};
+    settings.headers = Object.assign({
+      'Accept':'application/json',
+      'Content-Type':'application/json',
+      'Authorization':'Bearer '+token
+    }, settings.headers || {});
+    var response = await fetch(apiBase + path, settings);
+    var body = null;
+    try{ body = await response.json(); }catch(e){}
+    if(!response.ok){
+      var error = new Error((body && body.message) || 'Database request failed.');
+      error.status = response.status;
+      throw error;
+    }
+    return body;
+  }
+
+  window.storage = {
+    async get(key,shared){
+      try{
+        return await request('/api/auth/storage?key='+encodeURIComponent(key)+'&shared='+(shared?'true':'false'),{method:'GET'});
+      }catch(error){
+        if(error.status===404) return null;
+        throw error;
+      }
+    },
+    async set(key,value,shared){
+      return request('/api/auth/storage',{
+        method:'PUT',
+        body:JSON.stringify({key:key,value:value,shared:!!shared})
+      });
+    },
+    async delete(key,shared){
+      return request('/api/auth/storage?key='+encodeURIComponent(key)+'&shared='+(shared?'true':'false'),{method:'DELETE'});
+    },
+    async list(prefix,shared){
+      return request('/api/auth/storage?prefix='+encodeURIComponent(prefix||'')+'&shared='+(shared?'true':'false'),{method:'GET'});
+    }
+  };
+
+  if(typeof loadState==='function') await loadState();
+  if(typeof renderNav==='function') renderNav();
+  if(typeof renderPage==='function') renderPage();
+})();
+`;
 </script>
 <script>
 
@@ -2382,8 +2478,8 @@ document.getElementById('authForm').addEventListener('submit', async function(e)
     emailInput.focus();
     return;
   }
-  if(password.length < 6){
-    errorMsg.textContent = 'Password must contain at least 6 characters.';
+  if(password.length < 8){
+    errorMsg.textContent = 'Password must contain at least 8 characters.';
     errorMsg.classList.add('show');
     passwordInput.focus();
     return;
@@ -2395,27 +2491,18 @@ document.getElementById('authForm').addEventListener('submit', async function(e)
   continueLbl.textContent = mode === 'signup' ? 'Creating account…' : 'Signing in…';
 
   try {
-    if(mode === 'signup'){
-      const { data, error } = await supabaseClient.auth.signUp({
-        email,
-        password,
-        options: {
-          emailRedirectTo: window.location.origin + window.location.pathname,
-          data: { full_name: fullName, username: fullName || email.split('@')[0] }
-        }
-      });
-      if(error) throw error;
-
-      showToast(data.session ? 'Account created successfully.' : 'Check your email to confirm your account.');
-      if(data.session) showApp();
-    } else {
-      const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
-      if(error) throw error;
-      showToast('Signed in successfully.');
-      showApp();
-    }
+    const endpoint=mode==='signup'?'/api/auth/register':'/api/auth/login';
+    const data=await operatorsAuthRequest(endpoint,{
+      method:'POST',
+      body:JSON.stringify(mode==='signup'
+        ? {fullName:fullName,email:email,password:password}
+        : {email:email,password:password})
+    });
+    saveOperatorsSession(data);
+    showToast(mode==='signup'?'Account created successfully.':'Signed in successfully.');
+    showApp();
   } catch (err) {
-    console.error('Supabase authentication error:', err);
+    console.error('Operators Database authentication error:', err);
     errorMsg.textContent = err?.message || 'Authentication failed. Please try again.';
     errorMsg.classList.add('show');
   } finally {
