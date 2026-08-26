@@ -6685,7 +6685,7 @@ function targetDurationMonths(p){
 }
 function targetMoney(n,signed){const p=targetPlan(),v=Number(n)||0,sign=v<0?'-':(signed&&v>0?'+':'');return sign+(p.currency==='INR'?'₹':'$')+Math.abs(v).toLocaleString(p.currency==='INR'?'en-IN':'en-US',{maximumFractionDigits:0});}
 function targetTradePnl(t){const c=calcTrade(t),p=targetPlan();if(c.pnl==null)return null;return p.currency==='INR'?c.pnl*Number(t.targetExchangeRate||p.usdInrRate||83):c.pnl;}
-function targetTrades(){const accounts=targetModeAccounts(targetPageMode);return state.trades.map(function(t){return{trade:t,pnl:targetTradePnl(t)};}).filter(function(x){if(x.pnl==null)return false;if(!accounts.length)return false;const a=accounts.find(v=>v.id===x.trade.targetAccountId);if(!a)return false;if(a.type==='funded')return a.currentStage==='live'&&x.trade.targetPhase==='live';return true;});}
+function targetTrades(mode){const accounts=targetModeAccounts(mode||targetPageMode);return state.trades.map(function(t){return{trade:t,pnl:targetTradePnl(t)};}).filter(function(x){if(x.pnl==null)return false;if(!accounts.length)return false;const a=accounts.find(v=>v.id===x.trade.targetAccountId);if(!a)return false;if(a.type==='funded')return a.currentStage==='live'&&x.trade.targetPhase==='live';return true;});}
 function targetTradeDate(t){return t.targetSessionDate||t.date;}
 function targetMonthIndex(y,m){const p=targetPlan(),s=parseISO(p.startDate);return(y-s.getFullYear())*12+m-s.getMonth();}
 function targetMonthBounds(y,m){return{start:toISO(new Date(y,m,1)),end:toISO(new Date(y,m+1,0))};}
@@ -6699,19 +6699,19 @@ function targetPlanTradingStats(p){
   const start=p.startDate,end=targetPlanEnd(p),dates=targetTradingDates(start,end),count=Math.max(1,dates.length);
   return{start,end,dates,count,daily:Number(p.goal||0)/count,dailyLoss:Number(p.goal||0)/count/3};
 }
-function targetPnlRange(start,end){return targetTrades().filter(x=>targetTradeDate(x.trade)>=start&&targetTradeDate(x.trade)<=end).reduce((s,x)=>s+x.pnl,0);}
-function targetDayData(iso){const ts=targetTrades().filter(x=>targetTradeDate(x.trade)===iso),wins=ts.filter(x=>x.pnl>0).length,losses=ts.filter(x=>x.pnl<0).length;return{trades:ts.length,wins,losses,pnl:ts.reduce((s,x)=>s+x.pnl,0)};}
+function targetPnlRange(start,end,mode){return targetTrades(mode).filter(x=>targetTradeDate(x.trade)>=start&&targetTradeDate(x.trade)<=end).reduce((s,x)=>s+x.pnl,0);}
+function targetDayData(iso,mode){const ts=targetTrades(mode).filter(x=>targetTradeDate(x.trade)===iso),wins=ts.filter(x=>x.pnl>0).length,losses=ts.filter(x=>x.pnl<0).length;return{trades:ts.length,wins,losses,pnl:ts.reduce((s,x)=>s+x.pnl,0)};}
 function targetSessionDate(at){
   const p=targetPlan(),parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(at||new Date()).reduce((o,x)=>(o[x.type]=x.value,o),{}),start=String(p.sessionStart||'02:35').split(':').map(Number),mins=Number(parts.hour)*60+Number(parts.minute),d=new Date(Number(parts.year),Number(parts.month)-1,Number(parts.day));
   if(mins<(start[0]*60+start[1]))d.setDate(d.getDate()-1);return toISO(d);
 }
-function targetMonthEngine(y,m){
+function targetMonthEngine(y,m,mode){
   const p=targetPlan(),months=targetDurationMonths(p),idx=targetMonthIndex(y,m),b=targetMonthBounds(y,m),plan=targetPlanTradingStats(p);
   const monthStart=b.start<plan.start?plan.start:b.start,monthEnd=b.end>plan.end?plan.end:b.end,slotDates=targetTradingDates(monthStart,monthEnd),base=plan.daily*slotDates.length;
-  const priorEnd=toISO(new Date(y,m,0)),priorActual=priorEnd>=plan.start?targetPnlRange(plan.start,priorEnd):0,priorDates=priorEnd>=plan.start?targetTradingDates(plan.start,priorEnd).length:0;
+  const priorEnd=toISO(new Date(y,m,0)),priorActual=priorEnd>=plan.start?targetPnlRange(plan.start,priorEnd,mode):0,priorDates=priorEnd>=plan.start?targetTradingDates(plan.start,priorEnd).length:0;
   const priorPlanned=plan.daily*Math.min(plan.count,priorDates),carryIn=Math.max(0,priorPlanned-priorActual),remainingMonths=Math.max(1,months-Math.max(0,idx)),carryShare=carryIn/remainingMonths,burden=Math.max(0,base+carryShare),days=[];
-  let remaining=burden;const sessionIso=targetSessionDate();slotDates.forEach(function(iso,i){const day=parseISO(iso).getDate(),calendarLeft=slotDates.length-i,assigned=remaining/Math.max(1,calendarLeft),actual=targetDayData(iso).pnl;days.push({day,iso,assigned,actual,cf:actual-assigned});if(iso<=sessionIso)remaining-=actual;});
-  const actual=targetPnlRange(monthStart,monthEnd);return{base,carryIn,carryShare,remainingMonths,burden,actual,remaining:burden-actual,days,idx,months,tradingDays:slotDates.length,totalTradingDays:plan.count,dailyBase:plan.daily,dailyLossLimit:plan.dailyLoss};
+  let remaining=burden;const sessionIso=targetSessionDate();slotDates.forEach(function(iso,i){const day=parseISO(iso).getDate(),calendarLeft=slotDates.length-i,assigned=remaining/Math.max(1,calendarLeft),actual=targetDayData(iso,mode).pnl;days.push({day,iso,assigned,actual,cf:actual-assigned});if(iso<=sessionIso)remaining-=actual;});
+  const actual=targetPnlRange(monthStart,monthEnd,mode);return{base,carryIn,carryShare,remainingMonths,burden,actual,remaining:burden-actual,days,idx,months,tradingDays:slotDates.length,totalTradingDays:plan.count,dailyBase:plan.daily,dailyLossLimit:plan.dailyLoss};
 }
 function targetCapital(){const a=getActiveAccount(),p=targetPlan(),rate=p.currency==='INR'?Number(p.usdInrRate||83):1,log=a.capitalLog||[],depUsd=log.filter(x=>x.type==='deposit').reduce((s,x)=>s+Number(x.amount||0),0),wdUsd=log.filter(x=>x.type==='withdraw').reduce((s,x)=>s+Number(x.amount||0),0),trading=targetTrades().reduce((s,x)=>s+x.pnl,0),baseUsd=Number(state.startingBalance||0)-depUsd+wdUsd;return{dep:depUsd*rate,wd:wdUsd*rate,base:baseUsd*rate,trading,current:(Number(state.startingBalance||0)*rate)+trading};}
 function targetMetric(label,value,cls,boxCls){return`<div class="target-metric ${boxCls||''}"><span>${label}</span><strong class="${cls||''}">${value}</strong></div>`;}
@@ -6865,12 +6865,12 @@ function targetCalendarHtml(eng){
   return`<section class="target-calendar-shell"><div class="target-calendar-head"><div><h2>${MONTH_NAMES[month]} ${year}</h2><div class="target-calendar-note">22 fixed target days · weekends/market-closed dates excluded · click a trading date to add a trade</div></div><div class="target-month-nav"><button class="target-btn" onclick="moveTargetMonth(-1)">←</button><strong>${MONTH_NAMES[month]} ${year}</strong><button class="target-btn" onclick="moveTargetMonth(1)">→</button></div></div><div class="target-weekdays">${['MON','TUE','WED','THU','FRI','SAT','SUN'].map(x=>`<div>${x}</div>`).join('')}</div><div class="target-calendar-grid">${cells}</div></section>`;
 }
 function openTargetCalendarDate(iso){targetSelectedDate=iso;renderPage();setTimeout(()=>openTargetTradeModal(iso),0);}
-function targetDailyCardState(p){
-  const todayIso=targetSessionDate(),todayDate=parseISO(todayIso),todayEngine=targetMonthEngine(todayDate.getFullYear(),todayDate.getMonth()),todayPlan=todayEngine.days.find(x=>x.iso===todayIso),todayData=targetDayData(todayIso),todayComplete=Boolean(todayPlan&&todayPlan.assigned>0&&todayData.pnl>=todayPlan.assigned);
+function targetDailyCardState(p,mode){
+  const todayIso=targetSessionDate(),todayDate=parseISO(todayIso),todayEngine=targetMonthEngine(todayDate.getFullYear(),todayDate.getMonth(),mode),todayPlan=todayEngine.days.find(x=>x.iso===todayIso),todayData=targetDayData(todayIso,mode),todayComplete=Boolean(todayPlan&&todayPlan.assigned>0&&todayData.pnl>=todayPlan.assigned);
   if(todayPlan&&!todayComplete)return{label:"Today's target",isNext:false,plan:todayPlan,data:todayData,iso:todayIso};
   const nextDate=new Date(todayDate);nextDate.setDate(nextDate.getDate()+1);const nextStart=toISO(nextDate)<p.startDate?p.startDate:toISO(nextDate),nextIso=targetTradingDates(nextStart,targetPlanEnd(p))[0];
-  if(nextIso){const d=parseISO(nextIso),nextEngine=targetMonthEngine(d.getFullYear(),d.getMonth()),nextPlan=nextEngine.days.find(x=>x.iso===nextIso);if(nextPlan)return{label:'Next target',isNext:true,plan:nextPlan,data:targetDayData(nextIso),iso:nextIso};}
-  const fallback=todayPlan||todayEngine.days[0];return{label:todayComplete?'Next target':"Today's target",isNext:todayComplete,plan:fallback,data:targetDayData(fallback?.iso||todayIso),iso:fallback?.iso||todayIso};
+  if(nextIso){const d=parseISO(nextIso),nextEngine=targetMonthEngine(d.getFullYear(),d.getMonth(),mode),nextPlan=nextEngine.days.find(x=>x.iso===nextIso);if(nextPlan)return{label:'Next target',isNext:true,plan:nextPlan,data:targetDayData(nextIso,mode),iso:nextIso};}
+  const fallback=todayPlan||todayEngine.days[0];return{label:todayComplete?'Next target':"Today's target",isNext:todayComplete,plan:fallback,data:targetDayData(fallback?.iso||todayIso,mode),iso:fallback?.iso||todayIso};
 }
 function pageTarget(){
   if(targetPageMode==='compounding')return compoundingRoadmapPage();
@@ -7014,8 +7014,15 @@ function calendarCompoundingModel(year,month){
   return{account,currency,rate,lossRate,days,current,todayPnl,todayTarget,todayLossLimit,todayTargetComplete,displayTarget:todayTargetComplete?todayClosing*rate/100:todayTarget,displayLossLimit:todayTargetComplete?todayClosing*lossRate/100:todayLossLimit};
 }
 function calendarCompoundingStatusHtml(model){if(!model)return'';const money=n=>compoundingMoney(n,model.currency),startingBalance=Math.max(0,Number(model.account.capital)||0),targetLabel=model.todayTargetComplete?'Next target':"Today's target",riskLabel=model.todayTargetComplete?'Next risk limit':"Today's risk limit";return`<div class="cal-compounding-status"><div class="cal-compounding-lead"><div class="cal-compounding-mark">↗</div><div><span>Account starting balance</span><strong>${money(startingBalance)}</strong><small>Original capital before deposits, withdrawals, and trading.</small></div></div><div class="cal-compounding-stat"><span>Current balance</span><strong>${money(model.current)}</strong></div><div class="cal-compounding-stat target"><span>${targetLabel} · ${model.rate}%</span><strong>+${money(model.displayTarget)}</strong></div><div class="cal-compounding-stat loss"><span>${riskLabel} · ${model.lossRate}%</span><strong>−${money(model.displayLossLimit)}</strong></div></div>`;}
+function calendarProfitTargetModel(){
+  const id=calendarAccountId(),p=targetPlan(),account=(p.targetAccounts||[]).find(a=>a.id===id);
+  if(!account||targetAccountMode(account)!=='profit')return null;
+  const daily=targetDailyCardState(p,'profit'),displayTarget=Math.max(0,Number(daily.plan?.assigned||targetPlanTradingStats(p).daily)||0),displayLossLimit=displayTarget/3,starting=Math.max(0,Number(account.type==='funded'?account.accountSize:account.capital)||0),current=selectedTargetAccountBalance(account),capitalCurrency=account.currency==='INR'?'INR':'USD',targetCurrency=p.currency==='INR'?'INR':'USD',date=parseISO(daily.iso).toLocaleDateString('en-US',{month:'short',day:'numeric'});
+  return{account,daily,starting,current,capitalCurrency,targetCurrency,displayTarget,displayLossLimit,date};
+}
+function calendarProfitTargetStatusHtml(model){if(!model)return'';const capitalMoney=n=>compoundingMoney(n,model.capitalCurrency),targetMoneyValue=n=>compoundingMoney(n,model.targetCurrency),targetLabel=model.daily.isNext?'Next target':"Today's target",riskLabel=model.daily.isNext?'Next loss limit':"Today's loss limit";return`<div class="cal-compounding-status cal-profit-status"><div class="cal-compounding-lead"><div class="cal-compounding-mark">◎</div><div><span>Account starting balance</span><strong>${capitalMoney(model.starting)}</strong><small>Original capital before deposits, withdrawals, and trading.</small></div></div><div class="cal-compounding-stat"><span>Current balance</span><strong>${capitalMoney(model.current)}</strong></div><div class="cal-compounding-stat target"><span>${targetLabel} · ${model.date}</span><strong>+${targetMoneyValue(model.displayTarget)}</strong></div><div class="cal-compounding-stat loss"><span>${riskLabel}</span><strong>−${targetMoneyValue(model.displayLossLimit)}</strong></div></div>`;}
 function pageCalendar(){
-  const trades=calendarTrades();const{year,month}=calView,compoundingModel=calendarCompoundingModel(year,month);
+  const trades=calendarTrades();const{year,month}=calView,compoundingModel=calendarCompoundingModel(year,month),profitTargetModel=calendarProfitTargetModel();
   const today=new Date(),todayYear=today.getFullYear(),todayMonth=today.getMonth(),todayDay=today.getDate();
   const first=new Date(year,month,1);const startDow=(first.getDay()+6)%7;const dim=new Date(year,month+1,0).getDate();
   const cells=[];for(let i=0;i<startDow;i++)cells.push(null);for(let d=1;d<=dim;d++)cells.push(d);while(cells.length%7!==0)cells.push(null);
@@ -7061,7 +7068,7 @@ function pageCalendar(){
     <div class="cal-sum-card"><div class="cal-sum-label">Worst Day</div><div class="cal-sum-val txt-loss">${worstVal}<small class="cal-sum-date">${worstDay!=null?worstLabel:''}</small></div></div>
   </div>`;
   return`<div class="page-head"><div><div class="eyebrow">Calendar Sheet</div></div><div class="cal-toolbar">${calendarAccountSelector()}<div class="cal-nav"><button onclick="calMove(-1)" aria-label="Previous month">←</button><div class="cal-month">${MONTH_NAMES[month]} ${year}</div><button onclick="calMove(1)" aria-label="Next month">→</button></div></div></div>
-  ${summary}${calendarCompoundingStatusHtml(compoundingModel)}
+  ${summary}${calendarCompoundingStatusHtml(compoundingModel)}${calendarProfitTargetStatusHtml(profitTargetModel)}
   <div class="cal-grid">${grid}</div>`;
 }
 function calMove(dir){calView.month+=dir;if(calView.month<0){calView.month=11;calView.year--;}if(calView.month>11){calView.month=0;calView.year++;}renderPage();}
@@ -7162,7 +7169,7 @@ function pageSummaries(){
   });
   const tT=monthRows.reduce((a,m)=>a+m.trades,0),tW=monthRows.reduce((a,m)=>a+m.wins,0),tL=monthRows.reduce((a,m)=>a+m.losses,0),tBE=monthRows.reduce((a,m)=>a+m.be,0),tPnl=r2(monthRows.reduce((a,m)=>a+m.pnl,0)),tWR=tT?r2(tW/tT*100):0;
   const weeks=getWeekRanges(year);let wBal=state.startingBalance;
-  const weekRows=weeks.map(w=>{
+  const weekRows=weeks.map((w,weekIndex)=>{
     const wt=trades.filter(t=>{const d=parseISO(t.date);return d>=w.start&&d<=w.end;}).filter(t=>t.pnl!=null);
     const wins=wt.filter(t=>t.result==='WIN').length;
     const losses=wt.filter(t=>t.result==='LOSS').length;
@@ -7170,66 +7177,52 @@ function pageSummaries(){
     const wr=wt.length?r2(wins/wt.length*100):0;
     const pnl=r2(wt.reduce((a,t)=>a+t.pnl,0));
     wBal=r2(wBal+pnl);
-    return{start:w.start,end:w.end,count:wt.length,wins,losses,be,wr,pnl,bal:wBal};
+    return{start:w.start,end:w.end,weekNumber:weekIndex+1,count:wt.length,wins,losses,be,wr,pnl,bal:wBal};
   }).filter(w=>w.count>0).reverse();
-  return`<div class="page-head"><div><div class="eyebrow">Performance Summaries</div><div class="page-title">Summaries</div></div><div class="cal-nav"><button onclick="calView.year--;renderPage();">←</button><div class="cal-month">${year}</div><button onclick="calView.year++;renderPage();">→</button></div></div>
-  <div class="panel"><div class="panel-title">Monthly Summary — ${year}</div><div class="tbl-wrap" style="margin-top:10px;"><table><thead><tr><th>Month</th><th>Trades</th><th>Wins</th><th>Losses</th><th>BE</th><th>Win Rate</th><th>Net P&L</th><th>Running Balance</th></tr></thead><tbody>${monthRows.map(m=>`<tr><td style="font-family:Inter;font-weight:500;">${m.name}</td><td>${m.trades}</td><td class="txt-profit">${m.wins}</td><td class="txt-loss">${m.losses}</td><td>${m.be}</td><td>${fmtPct(m.wr)}</td><td class="${m.pnl>=0?'txt-profit':'txt-loss'}">${fmtMoney(m.pnl)}</td><td>${fmtMoney(m.runBal)}</td></tr>`).join('')}<tr style="font-weight:700;"><td style="font-family:Inter;">Yearly Total</td><td>${tT}</td><td class="txt-profit">${tW}</td><td class="txt-loss">${tL}</td><td>${tBE}</td><td>${fmtPct(tWR)}</td><td class="${tPnl>=0?'txt-profit':'txt-loss'}">${fmtMoney(tPnl)}</td><td>${fmtMoney(runBal)}</td></tr></tbody></table></div></div>
-  <div class="panel"><div class="panel-title">Weekly Summary</div><div class="panel-sub">Showing weeks with logged activity</div><div class="tbl-wrap"><table><thead><tr><th>Start</th><th>End</th><th>Trades</th><th>Wins</th><th>Losses</th><th>BE</th><th>Win Rate</th><th>Net P&L</th><th>Balance</th></tr></thead><tbody>${weekRows.length?weekRows.map(w=>`<tr><td>${toISO(w.start)}</td><td>${toISO(w.end)}</td><td>${w.count}</td><td class="txt-profit">${w.wins}</td><td class="txt-loss">${w.losses}</td><td>${w.be}</td><td>${fmtPct(w.wr)}</td><td class="${w.pnl>=0?'txt-profit':'txt-loss'}">${fmtMoney(w.pnl)}</td><td>${fmtMoney(w.bal)}</td></tr>`).join(''):`<tr><td colspan="9" style="text-align:center;color:var(--text-faint);font-family:Inter;">No trades logged this year yet</td></tr>`}</tbody></table></div></div>`;
+  const yearClosedTrades=trades.filter(t=>{const d=parseISO(t.date);return d&&d.getFullYear()===year&&t.pnl!=null;});
+  const activeMonths=monthRows.filter(m=>m.trades>0),positiveMonths=activeMonths.filter(m=>m.pnl>0).length,negativeMonths=activeMonths.filter(m=>m.pnl<0).length,flatMonths=activeMonths.length-positiveMonths-negativeMonths,grossProfit=yearClosedTrades.reduce((n,t)=>n+Math.max(0,t.pnl),0),grossLoss=Math.abs(yearClosedTrades.reduce((n,t)=>n+Math.min(0,t.pnl),0)),profitFactor=grossLoss>0?fmtNum(r2(grossProfit/grossLoss)):(grossProfit>0?'∞':'—'),yearReturn=state.startingBalance?r2(tPnl/state.startingBalance*100):0,avgTrade=tT?r2(tPnl/tT):0,avgMonth=activeMonths.length?r2(tPnl/activeMonths.length):0;
+  const bestMonth=activeMonths.length?activeMonths.reduce((best,m)=>!best||m.pnl>best.pnl?m:best,null):null,worstMonth=activeMonths.length?activeMonths.reduce((worst,m)=>!worst||m.pnl<worst.pnl?m:worst,null):null,maxMonthAbs=Math.max(1,...monthRows.map(m=>Math.abs(m.pnl))),winShare=tT?r2(tW/tT*100):0,lossShare=tT?r2(tL/tT*100):0,beShare=tT?r2(tBE/tT*100):0,ringRate=Number.isInteger(tWR)?`${tWR.toFixed(0)}%`:`${tWR.toFixed(1)}%`;
+  const resultClass=tPnl>0?'positive':tPnl<0?'negative':'flat',posture=tT===0?'No closed trades have been recorded for this year.':tPnl>0&&tWR>=50?'Profitable year with a positive win rate.':tPnl>0?'Profitable result with selective high-impact wins.':tPnl<0?'A defensive review is required before increasing risk.':'The year is currently at breakeven.';
+  const monthCards=monthRows.map((m,idx)=>{const bar=Math.max(m.pnl===0?0:3,Math.abs(m.pnl)/maxMonthAbs*50),stateClass=m.pnl>0?'positive':m.pnl<0?'negative':'flat';return`<article class="summary-month-card ${stateClass} ${m.trades?'active':'empty'}"><header><span>${String(idx+1).padStart(2,'0')}</span><strong>${m.name.slice(0,3)}</strong><small>${m.trades} trade${m.trades===1?'':'s'}</small></header><div class="summary-month-bar" aria-label="${esc(m.name)} net P and L ${esc(fmtMoney(m.pnl))}"><i class="${stateClass}" style="--summary-bar:${bar}%"></i></div><div class="summary-month-result"><b class="${m.pnl>=0?'txt-profit':'txt-loss'}">${fmtMoney(m.pnl,true)}</b><span>${m.trades?fmtPct(m.wr)+' WR':'No activity'}</span></div></article>`;}).join('');
+  const monthlyLedger=monthRows.map(m=>`<tr class="${m.trades?'':'summary-empty-row'}"><td><span class="summary-table-period">${m.name}</span></td><td>${m.trades}</td><td class="txt-profit">${m.wins}</td><td class="txt-loss">${m.losses}</td><td>${m.be}</td><td>${fmtPct(m.wr)}</td><td class="${m.pnl>=0?'txt-profit':'txt-loss'}">${fmtMoney(m.pnl)}</td><td>${fmtMoney(m.runBal)}</td></tr>`).join('');
+  const weeklyLedger=weekRows.length?weekRows.map(w=>`<tr><td><span class="summary-week-number">W${String(w.weekNumber).padStart(2,'0')}</span></td><td><span class="summary-table-period">${toISO(w.start)}</span><small class="summary-week-end">to ${toISO(w.end)}</small></td><td>${w.count}</td><td class="txt-profit">${w.wins}</td><td class="txt-loss">${w.losses}</td><td>${w.be}</td><td>${fmtPct(w.wr)}</td><td class="${w.pnl>=0?'txt-profit':'txt-loss'}">${fmtMoney(w.pnl)}</td><td>${fmtMoney(w.bal)}</td></tr>`).join(''):`<tr><td colspan="9"><div class="summary-empty-state"><span>NO WEEKLY DATA</span><strong>Your weekly report will build automatically</strong><small>Closed trades from ${year} will appear here.</small></div></td></tr>`;
+  return`<div class="summaries-page">
+    <header class="summaries-head"><div><span class="summaries-kicker">PERFORMANCE REPORT</span><h1>Year in Review</h1><p>A complete view of outcomes, consistency and account progression.</p></div><div class="summaries-year-nav" aria-label="Summary year"><button onclick="calView.year--;renderPage();" aria-label="Previous year">←</button><div><span>REPORTING YEAR</span><strong>${year}</strong></div><button onclick="calView.year++;renderPage();" aria-label="Next year">→</button></div></header>
+    <section class="summary-hero-grid" aria-label="Annual performance overview"><article class="summary-result-card ${resultClass}"><div class="summary-result-top"><span>NET RESULT · ${year}</span><small>${tT} CLOSED TRADE${tT===1?'':'S'}</small></div><strong>${fmtMoney(tPnl,true)}</strong><div class="summary-result-meta"><div><span>Year return</span><b class="${yearReturn>=0?'txt-profit':'txt-loss'}">${yearReturn>0?'+':''}${fmtPct(yearReturn)}</b></div><div><span>Closing balance</span><b>${fmtMoney(runBal)}</b></div></div><p>${posture}</p></article><div class="summary-kpi-grid"><article><span>Total trades</span><strong>${tT}</strong><small>${activeMonths.length} active month${activeMonths.length===1?'':'s'}</small></article><article><span>Win rate</span><strong>${fmtPct(tWR)}</strong><small>${tW} wins · ${tL} losses</small></article><article><span>Profit factor</span><strong>${profitFactor}</strong><small>${grossProfit?fmtMoney(r2(grossProfit))+' gross profit':'No realized profit'}</small></article><article><span>Average trade</span><strong class="${avgTrade>=0?'txt-profit':'txt-loss'}">${fmtMoney(avgTrade,true)}</strong><small>Across closed trades</small></article></div></section>
+    <section class="summary-insight-grid"><article class="summary-outcome-card"><div class="summary-section-heading"><div><span>OUTCOME MIX</span><h2>Trade distribution</h2></div><small>${tT?`${tT} results`:'Awaiting trades'}</small></div><div class="summary-outcome-body"><div class="summary-outcome-score"><span>WIN RATE</span><strong>${ringRate}</strong><small>${tT?`${tW} of ${tT} closed trades won`:'No closed trades yet'}</small></div><div class="summary-outcome-breakdown"><div class="summary-outcome-row win"><div><span><i></i>Wins</span><b>${tW}</b></div><div class="summary-outcome-track"><i style="--outcome-width:${winShare}%"></i></div></div><div class="summary-outcome-row loss"><div><span><i></i>Losses</span><b>${tL}</b></div><div class="summary-outcome-track"><i style="--outcome-width:${lossShare}%"></i></div></div><div class="summary-outcome-row be"><div><span><i></i>Breakeven</span><b>${tBE}</b></div><div class="summary-outcome-track"><i style="--outcome-width:${beShare}%"></i></div></div></div></div></article><article class="summary-insights-card"><div class="summary-section-heading"><div><span>YEAR SIGNALS</span><h2>Performance highlights</h2></div><small>${positiveMonths} positive · ${negativeMonths} negative</small></div><div class="summary-insight-list"><div class="best"><span>Best month</span><strong>${bestMonth?bestMonth.name:'—'}</strong><b>${bestMonth?fmtMoney(bestMonth.pnl,true):'No activity'}</b></div><div class="weak"><span>Weakest month</span><strong>${worstMonth?worstMonth.name:'—'}</strong><b>${worstMonth?fmtMoney(worstMonth.pnl,true):'No activity'}</b></div><div><span>Average active month</span><strong>${activeMonths.length} / 12</strong><b>${fmtMoney(avgMonth,true)}</b></div><div><span>Monthly consistency</span><strong>${positiveMonths} profitable</strong><b>${flatMonths} flat</b></div></div></article></section>
+    <section class="summary-report-panel"><div class="summary-report-head"><div><span>MONTHLY PERFORMANCE</span><h2>Momentum across ${year}</h2><p>Each month shows net P&amp;L, trading activity and win rate.</p></div><div class="summary-report-badge"><i></i>${activeMonths.length?`${positiveMonths} OF ${activeMonths.length} ACTIVE MONTHS POSITIVE`:'NO ACTIVITY YET'}</div></div><div class="summary-month-grid">${monthCards}</div><div class="summary-ledger-head"><div><span>MONTHLY LEDGER</span><h3>Detailed account progression</h3></div><small>Starting balance ${fmtMoney(state.startingBalance)}</small></div><div class="tbl-wrap summary-table-wrap"><table class="summary-table"><thead><tr><th>Month</th><th>Trades</th><th>Wins</th><th>Losses</th><th>BE</th><th>Win Rate</th><th>Net P&amp;L</th><th>Running Balance</th></tr></thead><tbody>${monthlyLedger}<tr class="summary-total-row"><td><span class="summary-table-period">Yearly Total</span></td><td>${tT}</td><td class="txt-profit">${tW}</td><td class="txt-loss">${tL}</td><td>${tBE}</td><td>${fmtPct(tWR)}</td><td class="${tPnl>=0?'txt-profit':'txt-loss'}">${fmtMoney(tPnl)}</td><td>${fmtMoney(runBal)}</td></tr></tbody></table></div></section>
+    <section class="summary-report-panel weekly"><div class="summary-report-head"><div><span>WEEKLY REPORT</span><h2>Execution by trading week</h2><p>Only weeks containing closed trades are included.</p></div><div class="summary-report-badge neutral">${weekRows.length} ACTIVE WEEK${weekRows.length===1?'':'S'}</div></div><div class="tbl-wrap summary-table-wrap"><table class="summary-table weekly"><thead><tr><th>Week</th><th>Period</th><th>Trades</th><th>Wins</th><th>Losses</th><th>BE</th><th>Win Rate</th><th>Net P&amp;L</th><th>Balance</th></tr></thead><tbody>${weeklyLedger}</tbody></table></div></section>
+  </div>`;
 }
 
 function pageRiskCalc(){
   const acc=getActiveAccount();
   const bal=acc?acc.startingBalance:state.startingBalance;
-  return`<div class="page-head"><div><div class="eyebrow">Position Sizing</div><div class="page-title">Risk Calculator</div></div></div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start;">
-    <div class="panel">
-      <div class="panel-title">Trade Inputs</div>
-      <div class="panel-sub" style="margin-bottom:16px;">Enter your account and trade details</div>
-      <div style="display:grid;gap:14px;">
-        <div><label class="lg-label">Account Balance</label><input class="lg-input" type="number" id="rc-balance" value="${bal}" step="0.01"></div>
-        <div><label class="lg-label">Risk per Trade (%)</label><input class="lg-input" type="number" id="rc-risk-pct" value="1" step="0.1"></div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-          <div><label class="lg-label">Entry Price</label><input class="lg-input" type="number" id="rc-entry" value="" step="0.00001" placeholder="e.g. 2350.00"></div>
-          <div><label class="lg-label">Stop Loss Price</label><input class="lg-input" type="number" id="rc-sl" value="" step="0.00001" placeholder="e.g. 2345.00"></div>
-        </div>
-        <div><label class="lg-label">Take Profit Price (optional)</label><input class="lg-input" type="number" id="rc-tp" value="" step="0.00001" placeholder="e.g. 2360.00"></div>
-        <div><label class="lg-label">Instrument</label>
-          <select class="lg-input" id="rc-instrument">
-            <option value="XAUUSD">XAUUSD (Gold) — $1/pip per 0.01 lot</option>
-            <option value="FX">Forex Pair — $10/pip per 1.0 lot (standard)</option>
-            <option value="CUSTOM">Custom — set pip value manually</option>
-          </select>
-        </div>
-        <div id="rc-custom-pip-wrap" style="display:none;"><label class="lg-label">Pip Value per 1.0 Lot ($)</label><input class="lg-input" type="number" id="rc-pip-value" value="10" step="0.01"></div>
-      </div>
-    </div>
-    <div class="panel">
-      <div class="panel-title">Position Size Result</div>
-      <div class="panel-sub" style="margin-bottom:16px;">Updates live as you type</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
-        <div style="background:var(--surface-2);border:1px solid var(--border-soft);border-radius:8px;padding:14px;">
-          <div class="lg-label" style="margin-bottom:6px;">Amount at Risk</div>
-          <div id="rc-out-risk-amt" style="font-family:var(--font-display);font-size:24px;font-weight:600;" class="txt-loss">$0.00</div>
-        </div>
-        <div style="background:var(--surface-2);border:1px solid var(--border-soft);border-radius:8px;padding:14px;">
-          <div class="lg-label" style="margin-bottom:6px;">Stop Distance</div>
-          <div id="rc-out-distance" style="font-family:var(--font-display);font-size:24px;font-weight:600;">0.0 pips</div>
-        </div>
-        <div style="background:var(--surface-2);border:1px solid var(--border-soft);border-radius:8px;padding:14px;">
-          <div class="lg-label" style="margin-bottom:6px;">Position Size (Lots)</div>
-          <div id="rc-out-lots" style="font-family:var(--font-display);font-size:24px;font-weight:600;color:var(--gold-light);">0.00</div>
-        </div>
-        <div style="background:var(--surface-2);border:1px solid var(--border-soft);border-radius:8px;padding:14px;">
-          <div class="lg-label" style="margin-bottom:6px;">Risk : Reward</div>
-          <div id="rc-out-rr" style="font-family:var(--font-display);font-size:24px;font-weight:600;">—</div>
-        </div>
-      </div>
-      <div style="background:var(--surface-2);border:1px solid var(--border-soft);border-radius:8px;padding:14px;">
-        <div class="lg-label" style="margin-bottom:6px;">Potential Profit at Take Profit</div>
-        <div id="rc-out-profit" style="font-family:var(--font-display);font-size:20px;font-weight:600;" class="txt-profit">—</div>
-      </div>
-      <div class="panel-sub" style="margin-top:14px;line-height:1.5;">This is a planning tool only — always confirm lot size and pip values against your broker's contract specs before placing a trade.</div>
-    </div>
+  const accountName=acc&&acc.name?acc.name:'Journal account';
+  return`<div class="risk-calc-page">
+    <header class="risk-calc-head"><div><span class="risk-calc-kicker">RISK DESK · POSITION SIZING</span><h1>Trade Risk Calculator</h1><p>Define the risk first, then calculate a position size that respects your account.</p></div><div class="risk-account-chip"><span>ACTIVE ACCOUNT</span><strong>${esc(accountName)}</strong><small>${fmtMoney(bal)} starting balance</small></div></header>
+
+    <main class="risk-calc-layout">
+      <section class="risk-input-panel">
+        <div class="risk-panel-head"><div><span>01 · TRADE PARAMETERS</span><h2>Build the position</h2><p>Enter your capital, risk allowance and planned price levels.</p></div><div class="risk-panel-tag">INPUT</div></div>
+
+        <div class="risk-input-section"><div class="risk-section-title"><span>CAPITAL &amp; RISK</span><small>Set the maximum account exposure for this trade.</small></div><div class="risk-form-grid two"><label class="risk-field"><span>Account Balance <i>USD</i></span><input class="lg-input" type="number" id="rc-balance" value="${bal}" step="0.01"><small>Loaded from ${esc(accountName)}</small></label><label class="risk-field"><span>Risk per Trade <i>%</i></span><input class="lg-input" type="number" id="rc-risk-pct" value="1" step="0.1"><small>Percentage of balance at risk</small></label></div></div>
+
+        <div class="risk-input-section"><div class="risk-section-title"><span>PRICE LEVELS</span><small>Use the same price precision shown by your broker.</small></div><div class="risk-form-grid price"><label class="risk-field"><span>Entry Price</span><input class="lg-input" type="number" id="rc-entry" value="" step="0.00001" placeholder="e.g. 2350.00"></label><label class="risk-field"><span>Stop Loss Price</span><input class="lg-input" type="number" id="rc-sl" value="" step="0.00001" placeholder="e.g. 2345.00"></label><label class="risk-field"><span>Take Profit <i>OPTIONAL</i></span><input class="lg-input" type="number" id="rc-tp" value="" step="0.00001" placeholder="e.g. 2360.00"></label></div></div>
+
+        <div class="risk-input-section contract"><div class="risk-section-title"><span>CONTRACT SPECIFICATION</span><small>Select the instrument model used for pip calculations.</small></div><div class="risk-form-grid contract"><label class="risk-field"><span>Instrument</span><select class="lg-input" id="rc-instrument"><option value="XAUUSD">XAUUSD (Gold) — $1/pip per 0.01 lot</option><option value="FX">Forex Pair — $10/pip per 1.0 lot (standard)</option><option value="CUSTOM">Custom — set pip value manually</option></select></label><label class="risk-field custom" id="rc-custom-pip-wrap" style="display:none;"><span>Pip Value per 1.0 Lot <i>USD</i></span><input class="lg-input" type="number" id="rc-pip-value" value="10" step="0.01"></label></div></div>
+      </section>
+
+      <aside class="risk-output-panel">
+        <div class="risk-panel-head compact"><div><span>02 · CALCULATED PLAN</span><h2>Position output</h2></div><div class="risk-live-state"><i></i>LIVE</div></div>
+        <div class="risk-lot-hero"><span>POSITION SIZE</span><div><strong id="rc-out-lots">0.00</strong><b>LOTS</b></div><small>Calculated from your balance, risk and stop distance.</small></div>
+        <div class="risk-result-grid"><article class="risk-result-card danger"><span>AMOUNT AT RISK</span><strong id="rc-out-risk-amt" class="txt-loss">$0.00</strong><small>Maximum planned loss</small></article><article class="risk-result-card"><span>STOP DISTANCE</span><strong id="rc-out-distance">—</strong><small>Entry to stop loss</small></article><article class="risk-result-card"><span>RISK : REWARD</span><strong id="rc-out-rr">—</strong><small>Requires take profit</small></article></div>
+        <div class="risk-profit-card"><div><span>POTENTIAL PROFIT</span><small>Projected at take-profit price</small></div><strong id="rc-out-profit" class="txt-profit">—</strong></div>
+        <div class="risk-safety-note"><span>EXECUTION CHECK</span><p>Confirm the final lot size, pip value and contract specification with your broker before placing the order.</p></div>
+      </aside>
+    </main>
+
+    <section class="risk-process-strip" aria-label="Position sizing workflow"><div><span>01</span><p><strong>Set capital risk</strong><small>Choose the maximum loss the account can absorb.</small></p></div><div><span>02</span><p><strong>Define invalidation</strong><small>Place the stop where the trade idea is no longer valid.</small></p></div><div><span>03</span><p><strong>Verify execution</strong><small>Match the calculated size to the broker contract.</small></p></div></section>
   </div>`;
 }
 
