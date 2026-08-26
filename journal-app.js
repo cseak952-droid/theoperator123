@@ -16,7 +16,7 @@ window.LW_DEBUG_FORCE_RISK_SENTINEL_LEGEND = false;
    DATABASE CONNECTION (replaces window.storage with real Postgres via PostgREST)
    IMPORTANT: Update API_BASE_URL below whenever your cloudflared tunnel URL changes.
    ============================================================ */
-const API_BASE_URL = 'https://metres-olympics-comparable-south.trycloudflare.com';
+const API_BASE_URL = 'https://protein-incorporate-desktop-regulatory.trycloudflare.com';
 
 function _kvEnc(s){return encodeURIComponent(s);}
 function _kvOwner(){return (typeof loggedInUser==='string' && loggedInUser) ? loggedInUser : 'anonymous';}
