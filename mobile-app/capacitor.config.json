@@ -1,0 +1,9 @@
+{
+  "appId": "com.theoperators.tradingjournal",
+  "appName": "The Operators Journal",
+  "webDir": "www",
+  "backgroundColor": "#04080f",
+  "server": {
+    "androidScheme": "https"
+  }
+}

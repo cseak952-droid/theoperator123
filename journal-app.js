@@ -1039,16 +1039,28 @@ function openProfileSettings(){
       '</div>';
 
   overlay.innerHTML=
-    '<div class="shot-modal ps-modal">'+
-      '<div class="shot-modal-head"><div class="shot-modal-title">Settings</div><button type="button" class="shot-modal-close" onclick="closeProfileSettings()">✕</button></div>'+
-      '<div class="acct-modal-sub">Personal profile information is kept separate from platform &amp; trading configuration.</div>'+
+    '<div class="shot-modal ps-modal" role="dialog" aria-modal="true" aria-labelledby="ps-title">'+
+      '<div class="ps-header"><div class="shot-modal-head"><div><span class="ps-eyebrow">YOUR WORKSPACE</span><div class="shot-modal-title" id="ps-title">Settings</div></div><button type="button" class="shot-modal-close" aria-label="Close settings" onclick="closeProfileSettings()">✕</button></div>'+
+      '<div class="acct-modal-sub">Make it yours. Manage your identity and preferences.</div></div>'+
       '<div class="ps-tabs">'+
         '<button type="button" class="ps-tab'+(isProfileTab?' active':'')+'" onclick="switchPsTab(\'profile\')"><span class="ps-tab-ic">👤</span>Profile Settings<span class="ps-tab-sub">Photo, bio, socials</span></button>'+
         '<button type="button" class="ps-tab'+(isProfileTab?'':' active')+'" onclick="switchPsTab(\'trading\')"><span class="ps-tab-ic">📈</span>Trading Preferences<span class="ps-tab-sub">Notifications, privacy, appearance</span></button>'+
       '</div>'+
       '<div class="ps-body">'+(isProfileTab?profileTabHtml:tradingTabHtml)+'</div>'+
+      '<div class="ps-footer"><span>Changes save automatically · Username saves separately</span><button type="button" class="btn" onclick="closeProfileSettings()">Done</button></div>'+
     '</div>';
   document.body.appendChild(overlay);
+  const upload=overlay.querySelector('.ps-upload-btn');
+  if(upload){upload.tabIndex=0;upload.setAttribute('role','button');upload.onkeydown=function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();overlay.querySelector('#ps-avatar-input').click();}};}
+  overlay.querySelectorAll('.ps-field-label').forEach(function(label,i){const input=label.nextElementSibling;if(input){input.id='ps-field-'+i;label.htmlFor=input.id;}});
+  overlay.querySelector('#ps-username-input')?.setAttribute('aria-label','Username');
+  overlay.querySelector('#ps-sound-toggle')?.setAttribute('aria-label','Toast and sound notifications');
+  overlay.querySelector('#ps-achv-public-toggle')?.setAttribute('aria-label','Public profile');
+  overlay.onkeydown=function(e){
+    if(e.key==='Escape'){e.preventDefault();closeProfileSettings();return;}
+    if(e.key==='Tab'){const items=[...overlay.querySelectorAll('button,input,textarea,[tabindex="0"]')].filter(el=>!el.disabled&&el.getClientRects().length);const first=items[0],last=items[items.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}
+  };
+  overlay.querySelector('.ps-tab.active').focus();
 }
 function closeProfileSettings(){
   const ov=document.getElementById('ps-modal-overlay');
@@ -1257,7 +1269,48 @@ function getMonthTrades(trades,year,month){return trades.filter(t=>{const d=pars
 function renderNav(){
   document.getElementById('nav').innerHTML=PAGES.map(p=>`<a class="nav-item ${p.id==='blubluai'?'nav-item-blublu':''} ${p.id===currentPage?'active':''}" data-label="${p.label}" onclick="navigate('${p.id}')">${ICONS[p.icon]}<span>${p.label}</span></a>`).join('');
 }
-function navigate(page){currentPage=page;closeMobileSidebar();renderNav();renderNetworkActive();renderPage();window.scrollTo(0,0);triggerQuantumWipe();triggerInfiniteZoomWipe();}
+let activePageAnimation=null;
+let pageNavigationSequence=0;
+async function navigate(page){
+  closeMobileSidebar();
+  if(page===currentPage){window.scrollTo(0,0);return;}
+  const sequence=++pageNavigationSequence;
+  const pageEl=document.getElementById('page');
+  if(activePageAnimation){activePageAnimation.cancel();activePageAnimation=null;}
+  const commit=function(){
+    currentPage=page;
+    renderNav();
+    renderNetworkActive();
+    window.scrollTo(0,0);
+    renderPage();
+  };
+  const reduceMotion=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if(reduceMotion||!pageEl||typeof pageEl.animate!=='function'){commit();return;}
+  pageEl.classList.add('route-transition-active');
+  const outgoing=pageEl.animate([
+    {opacity:1,transform:'translateY(0)'},
+    {opacity:.08,transform:'translateY(-2px)'}
+  ],{duration:95,easing:'cubic-bezier(.4,0,1,1)',fill:'forwards'});
+  activePageAnimation=outgoing;
+  try{await outgoing.finished;}catch(_err){}
+  if(sequence!==pageNavigationSequence)return;
+  outgoing.cancel();
+  commit();
+  pageEl.getAnimations({subtree:true}).forEach(function(animation){
+    try{animation.finish();}catch(_err){}
+  });
+  const incoming=pageEl.animate([
+    {opacity:.08,transform:'translateY(3px)'},
+    {opacity:1,transform:'translateY(0)'}
+  ],{duration:235,easing:'cubic-bezier(.16,1,.3,1)',fill:'both'});
+  activePageAnimation=incoming;
+  try{await incoming.finished;}catch(_err){}
+  if(sequence===pageNavigationSequence){
+    activePageAnimation=null;
+    pageEl.querySelectorAll('.card-enter').forEach(function(card){card.classList.remove('card-enter');card.style.animationDelay='';});
+    pageEl.classList.remove('route-transition-active','qf-wipe','iz-wipe');
+  }
+}
 function triggerQuantumWipe(){
   if(currentTheme!=='quantum-flow') return;
   const el=document.getElementById('page');
@@ -4318,11 +4371,11 @@ function pageDashboard(){
   ].map(m=>({...m, count:qBuckets[m.key]||0, pct: qTotal>0 ? r2((qBuckets[m.key]||0)/qTotal*100) : 0}));
 
   const NF = "'Outfit',sans-serif"; /* new number font */
-  const cardHead = (icon, title) => `<div style="display:flex;align-items:center;gap:10px;padding:15px 20px;border-bottom:1px solid rgba(255,255,255,.05);background:linear-gradient(180deg,rgba(255,255,255,.015),transparent);">
+  const cardHead = (icon, title) => `<div class="desk-card-head" style="display:flex;align-items:center;gap:10px;padding:15px 20px;border-bottom:1px solid rgba(255,255,255,.05);background:linear-gradient(180deg,rgba(255,255,255,.015),transparent);">
     <span style="display:flex;align-items:center;justify-content:center;width:29px;height:29px;border-radius:8px;background:linear-gradient(155deg,rgba(77,166,255,.16),rgba(77,166,255,.06));border:1px solid rgba(77,166,255,.18);flex-shrink:0;">${icon}</span>
     <span style="font-family:'Sora',sans-serif;font-size:12.5px;font-weight:700;color:var(--text);letter-spacing:.015em;">${title}</span>
   </div>`;
-  const sectionHead = (title, sub) => `<div style="display:flex;align-items:baseline;gap:12px;margin:30px 0 14px;">
+  const sectionHead = (title, sub) => `<div class="desk-section-head" style="display:flex;align-items:baseline;gap:12px;margin:30px 0 14px;">
     <span style="font-family:'Sora',sans-serif;font-size:12px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--text);">${title}</span>
     ${sub?`<span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--text-faint);letter-spacing:.04em;">${sub}</span>`:''}
     <span style="flex:1;height:1px;background:linear-gradient(90deg,rgba(255,255,255,.09),transparent);"></span>
@@ -4569,7 +4622,7 @@ function pageDashboard(){
     <!-- Widget Manager Toolbar -->
     <div class="wm-toolbar">
       <div class="wm-toolbar-left">
-        <span class="wm-toolbar-title">Dashboard Layout</span>
+        <span class="wm-toolbar-title">Dashboard</span>
       </div>
       <div class="wm-toolbar-right">
         <button onclick="openWidgetManager()" class="btn wm-tb-btn">
@@ -4668,7 +4721,7 @@ function pageDashboard(){
       </div>
 
       <!-- Current Drawdown -->
-      <div class="db-kpi kpi-loss">
+      <div class="db-kpi ${currentDD>0?'kpi-loss':'kpi-profit'}">
         <div class="db-label">Current Drawdown</div>
         <div class="db-num kv" style="color:${currentDD>0?'#FF4D6D':'#00E5A0'};">${currentDD>0?'-':''}${fmtPct(currentDDPct,1)}</div>
         <div class="db-num ksub" style="color:var(--text-faint);">${currentDD>0?curSym()+currentDD.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})+' from peak':'At equity peak'}</div>
@@ -4763,7 +4816,7 @@ function pageDashboard(){
         <div style="padding:16px 18px 18px;">
           <div style="background:var(--surface-2);border:1px solid var(--border-soft);border-radius:10px;padding:16px 18px;margin-bottom:12px;">
             <div class="db-sublabel" style="margin-bottom:8px;">NET PROFIT / LOSS</div>
-            <div class="db-num" style="font-size:40px;font-weight:700;color:${netPnl>=0?'#00E5A0':'#FF4D6D'};letter-spacing:-.5px;line-height:1;">${netPnl>=0?'':'-'}${curSym()}${Math.abs(netPnl/1000).toFixed(2)}K</div>
+            <div class="db-num" style="font-size:32px;font-weight:500;color:${netPnl>=0?'#00E5A0':'#FF4D6D'};letter-spacing:-.5px;line-height:1;">${fmtMoney(netPnl)}</div>
             <div style="margin-top:8px;display:flex;align-items:center;gap:5px;">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="${roi>=0?'#00E5A0':'#FF4D6D'}" stroke-width="2.5"><polyline points="${roi>=0?'23 6 13.5 15.5 8.5 10.5 1 18':'1 6 10.5 15.5 15.5 10.5 23 18'}"/></svg>
               <span class="db-num" style="font-size:13px;font-weight:600;color:${roi>=0?'#00E5A0':'#FF4D6D'};">ROI ${fmtPct(roi,1)}</span>
@@ -4905,7 +4958,7 @@ function pageDashboard(){
   /* store chart data globally so attachPageHandlers can draw after DOM is ready */
   window._dashChartData = {
     eqRaw:   s.curve.map(function(p){return p.balance;}),
-    startBal: state.startingBalance,
+    startBal: dashboardStartingBalance,
     wins:    s.wins||0,
     bes:     s.be||0,
     losses:  s.losses||0,
@@ -4913,6 +4966,7 @@ function pageDashboard(){
   };
   return _html;
 }
+
 
 const OPERATORS_LOCAL_API_BASE='http://127.0.0.1:5784';
 const OPERATORS_REMOTE_API_STORAGE_KEY='operators_cloudflare_api_base';
@@ -5587,19 +5641,15 @@ function pageTrades(){
       <div class="tbl-wrap trade-ledger-scroll"><table class="trade-ledger"><thead><tr><th>#</th><th>Side</th><th>Pair</th><th>Strategy</th><th>Lot</th><th>Entry</th><th>Exit</th><th>SL</th><th>TP</th><th>Pips</th><th>P&amp;L</th><th>Result</th><th>Risk %</th><th>Risk ${curSym()}</th><th>R:R</th><th>Pos Size</th><th>Session</th><th>Q</th><th title="Risk Sentinel compliance">⛨</th><th>Notes</th><th>Shots</th><th>Actions</th></tr></thead><tbody>${dt.map(t=>`<tr id="trade-row-${t.id}" class="trd-clickable-row" onclick="openTradeReviewDrawer(${t.id})" title="Open Trade Review"><td class="trade-id">#${t.id}</td><td><span class="tag ${t.side==='BUY'?'tag-buy':'tag-sell'}">${t.side}</span></td><td class="trade-pair">${esc(t.pair||'—')}</td><td><span class="strat-cell" data-id="${t.id}" onclick="event.stopPropagation();editStrategyCell(this,${t.id})" title="Click to edit strategy">${esc(t.strategy||'—')}</span></td><td>${fmtNum(t.lot,2)}</td><td>${t.entry!=null?t.entry.toFixed(2):'—'}</td><td>${t.exit!=null?t.exit.toFixed(2):'—'}</td><td>${t.sl!=null?t.sl.toFixed(2):'—'}</td><td>${t.tp!=null?t.tp.toFixed(2):'—'}</td><td class="${t.pips>0?'txt-profit':t.pips<0?'txt-loss':''}">${t.pips!=null?t.pips.toFixed(1):'—'}</td><td class="trade-pnl ${t.pnl>0?'txt-profit':t.pnl<0?'txt-loss':''}">${t.pnl!=null?fmtMoney(t.pnl,true):'—'}</td><td>${t.result?`<span class="tag tag-${t.result.toLowerCase()}">${t.result}</span>`:'—'}</td><td>${t.riskPercent!=null?fmtPct(t.riskPercent):'—'}</td><td>${t.riskDollar!=null?fmtMoney(t.riskDollar):'—'}</td><td>${t.rr!=null?fmtNum(t.rr):'—'}</td><td>${t.posSize!=null?fmtNum(t.posSize,3):'—'}</td><td>${esc(t.session||'—')}</td><td><span class="q-${(t.quality||'').replace('+','plus')}">${esc(t.quality||'—')}</span></td><td>${t.pnl!=null?(isRiskCompliantTrade(t)?'<span class="risk-status pass" title="Within risk rules">✓</span>':'<span class="risk-status fail" title="Risk rule broken — resets Risk Sentinel streak">!</span>'):'—'}</td><td class="trade-notes">${esc(t.notes||'—')}</td><td>${(t.shotCount||0)>0?`<button type="button" class="shot-btn" onclick="event.stopPropagation();openShotGallery(${t.id})" onmouseenter="showShotPreview(${t.id},event)" onmousemove="positionShotPreview(event)" onmouseleave="hideShotPreview()">▣ ${t.shotCount}</button>`:'<span class="trade-empty-value">—</span>'}</td><td class="qa-cell"><div class="qa-group"><button type="button" class="qa-btn" aria-label="View trade" title="View" onclick="event.stopPropagation();openTradeDetailModal(${t.id})">⌕</button><button type="button" class="qa-btn" aria-label="Edit trade" title="Edit" onclick="event.stopPropagation();openEditTradeModal(${t.id})">✎</button><button type="button" class="qa-btn" aria-label="Duplicate trade" title="Duplicate" onclick="event.stopPropagation();duplicateTrade(${t.id})">⧉</button><button type="button" class="qa-btn qa-del" aria-label="Delete trade" title="Delete" onclick="event.stopPropagation();deleteTrade(${t.id})">×</button></div></td></tr>`).join('')}</tbody></table></div>
     </article>`;
   }).join('');
-  return`<div class="trade-terminal">
+  return`<div class="trade-terminal trades-studio">
     <header class="trade-terminal-bar">
-      <div class="trade-terminal-title"><span class="trade-terminal-live"></span><div><h1>Trade Entry</h1><p>Execution ticket · ${todayTrades} trade${todayTrades===1?'':'s'} today</p></div></div>
-      <div class="trade-terminal-metrics">
-        <span><small>Total</small><b>${trades.length}</b></span>
-        <span><small>Closed</small><b>${closedTrades.length}</b></span>
-        <span><small>Win rate</small><b>${winRate}%</b></span>
-        <span class="${netPnl>0?'positive':netPnl<0?'negative':''}"><small>Net P&amp;L</small><b>${fmtMoney(netPnl,true)}</b></span>
-      </div>
+      <div class="trade-terminal-title"><div><p>YOUR EXECUTION JOURNAL</p><h1>Trades<span>.</span></h1><div class="trades-subtitle">Every setup. Every decision. One clear record.</div></div><span class="trades-today">${todayTrades} logged today</span></div>
     </header>
 
     <section class="panel te-panel trade-ticket">
+      <header class="trades-ticket-heading"><h2>New entry</h2></header>
       <form id="trade-form" novalidate>
+        <div class="trades-input-panels"><section class="trades-input-panel">
         <div class="trade-ticket-caption"><div><span>01</span><b>Market context</b></div><small>Assign the account and setup</small></div>
         <div class="trade-ticket-grid trade-ticket-context">
           <div class="field field-em target-trade-account-field"><label>Target account</label><select id="f-target-account" onchange="updateTradeTargetAccountDetails(this.value)">${targetTradeAccountOptions()}</select><small id="f-target-account-details">${esc(selectedAccount?targetTradeAccountLabel(selectedAccount):'No Target account assigned')}</small></div>
@@ -5610,6 +5660,7 @@ function pageTrades(){
           <div class="field"><label>Quality</label><select id="f-quality">${QUALITIES.map(q=>`<option>${q}</option>`).join('')}</select></div>
         </div>
 
+        </section><section class="trades-input-panel">
         <div class="trade-ticket-caption"><div><span>02</span><b>Execution &amp; risk</b></div><small>Prices, size, and setup</small></div>
         <div class="trade-ticket-grid trade-ticket-execution">
           <div class="field field-em"><label>Lot</label><input type="number" step="0.01" id="f-lot" value="0.10" required></div>
@@ -5619,6 +5670,7 @@ function pageTrades(){
           <div class="field field-em"><label>Strategy</label><input type="text" id="f-strategy" placeholder="e.g. ICT Setup, Pullback" list="strategy-suggestions"><datalist id="strategy-suggestions">${[...new Set(state.trades.map(t=>t.strategy).filter(Boolean))].map(s=>`<option value="${esc(s)}">`).join('')}</datalist></div>
         </div>
 
+        </section></div>
         <div class="trade-ticket-review">
           <div class="field trade-ticket-notes"><label>Trade note</label><input type="text" id="f-notes" placeholder="Setup, decision, or lesson"></div>
           ${tradePsychologyChecklist('f',null)}
@@ -5629,7 +5681,7 @@ function pageTrades(){
     </section>
 
     <section class="trade-history-section trade-terminal-history">
-      <header class="trade-history-heading"><div><span class="trade-terminal-section-label">Trade ledger</span><h2>History</h2></div><div class="trade-history-summary"><span><b>${trades.length}</b> entries</span><span><b>${closedTrades.length}</b> closed</span><span class="${netPnl>=0?'txt-profit':'txt-loss'}"><b>${fmtMoney(netPnl,true)}</b> net</span></div></header>
+      <header class="trade-history-heading"><div><span class="trade-terminal-section-label">YOUR TRACK RECORD</span><h2>Trade history</h2></div><div class="trade-history-summary"><span><b>${dates.length}</b> sessions</span><span>Latest first</span></div></header>
       ${groups||`<div class="trade-empty-state"><div class="trade-empty-icon">↗</div><div><h3>No trades yet</h3><p>Complete the execution ticket above to start your ledger.</p></div></div>`}
     </section>
   </div>`;
@@ -7170,13 +7222,19 @@ async function initCalendarImagePreviews(){
   if(!holders.length)return;
   const token=++calendarImageRenderToken;
   await Promise.all(holders.map(async function(holder){
+    holder.textContent='Loading charts…';holder.classList.add('media-loading');
     const tradeIds=String(holder.dataset.tradeIds||'').split(',').map(Number).filter(Number.isFinite),sources=[];
     for(const tradeId of tradeIds){
-      const shots=await getTradeShots(tradeId);
+      let shots=[];try{shots=await getTradeShots(tradeId);}catch(error){holder.dataset.loadError='true';}
       for(const source of shots){if(source&&sources.length<2)sources.push(source);}
       if(sources.length>=2)break;
     }
-    if(token!==calendarImageRenderToken||!holder.isConnected||!sources.length)return;
+    if(token!==calendarImageRenderToken||!holder.isConnected)return;
+    if(!sources.length){holder.closest('.cal-cell')?.classList.add('no-media');holder.textContent=holder.dataset.loadError?'Charts unavailable':'No charts attached';holder.classList.add('media-empty');return;}
+    const loaded=await Promise.all(sources.map(async source=>{const probe=new Image();probe.src=source;try{await Promise.race([probe.decode(),new Promise((_,reject)=>setTimeout(()=>reject(new Error('timeout')),10000))]);return source;}catch(error){return null;}}));
+    if(token!==calendarImageRenderToken||!holder.isConnected)return;
+    sources.splice(0,sources.length,...loaded.filter(Boolean));
+    if(!sources.length){holder.textContent='Charts unavailable';holder.classList.add('media-empty');return;}
     const fragment=document.createDocumentFragment();
     sources.forEach(function(source,index){
       const image=document.createElement('img');
@@ -7186,7 +7244,7 @@ async function initCalendarImagePreviews(){
       image.decoding='async';
       fragment.appendChild(image);
     });
-    holder.replaceChildren(fragment);
+    holder.replaceChildren(fragment);holder.classList.remove('media-loading');
     holder.dataset.imageCount=String(sources.length);
     holder.dataset.activeIndex='0';
     holder.tabIndex=0;
@@ -7196,19 +7254,21 @@ async function initCalendarImagePreviews(){
     holder.addEventListener('keydown',function(event){if(event.key==='Enter'||event.key===' '){focusCalendarImage(holder,event);}});
     holder.classList.add('ready');
     holder.closest('.cal-cell')?.classList.add('has-media');
+    const controls=document.createElement('div');controls.className='cal-image-controls';
+    const count=document.createElement('span');count.className='cal-image-position';count.textContent='1 / '+sources.length;controls.appendChild(count);
+    if(sources.length>1){const next=document.createElement('button');next.type='button';next.textContent='›';next.setAttribute('aria-label','Next chart for '+holder.dataset.dateLabel);next.addEventListener('click',event=>{event.stopPropagation();advanceCalendarImage(holder);});controls.appendChild(next);}
+    holder.closest('.cal-cell')?.appendChild(controls);
   }));
   if(token!==calendarImageRenderToken||!document.querySelector('.cal-media[data-image-count="2"]'))return;
   calendarImageRotationTimer=setInterval(function(){
     document.querySelectorAll('.cal-media[data-image-count="2"]').forEach(function(holder){
-      const images=holder.querySelectorAll('img');
-      if(images.length<2)return;
-      const current=holder.dataset.activeIndex==='1'?1:0,next=current===0?1:0;
-      images[current].classList.remove('active');
-      images[next].classList.add('active');
-      holder.dataset.activeIndex=String(next);
+      if(document.hidden||matchMedia('(prefers-reduced-motion: reduce)').matches||holder.closest('.cal-cell')?.matches(':hover, :focus-within'))return;
+      advanceCalendarImage(holder);
     });
   },5000);
 }
+function advanceCalendarImage(holder){const images=holder.querySelectorAll('img');if(images.length<2)return;const current=Number(holder.dataset.activeIndex)||0,next=(current+1)%images.length;images[current]?.classList.remove('active');images[next].classList.add('active');holder.dataset.activeIndex=String(next);const count=holder.closest('.cal-cell')?.querySelector('.cal-image-position');if(count)count.textContent=(next+1)+' / '+images.length;}
+function calendarGoToday(){const now=new Date();calView.year=now.getFullYear();calView.month=now.getMonth();renderPage();}
 function pageCalendar(){
   const trades=calendarTrades();const{year,month}=calView,compoundingModel=calendarCompoundingModel(year,month),profitTargetModel=calendarProfitTargetModel(),profitDayPlans=calendarProfitDayPlans(year,month),imageMode=calendarImageModeEnabled();
   const today=new Date(),todayYear=today.getFullYear(),todayMonth=today.getMonth(),todayDay=today.getDate();
@@ -7232,7 +7292,7 @@ function pageCalendar(){
     const profitRows=profitPlan?`<div class="cal-tip-row cal-tip-target"><span class="cal-tip-label">Day ${profitPlan.projectedDays} profit target</span><span class="txt-profit">+${compoundingMoney(profitPlan.dateTarget,profitDayPlans.currency)}</span></div><div class="cal-tip-row"><span class="cal-tip-label">Date loss limit</span><span class="txt-loss">−${compoundingMoney(profitPlan.lossLimit,profitDayPlans.currency)}</span></div>${profitPlan.nextDateTarget!=null?`<div class="cal-tip-row"><span class="cal-tip-label">Next day target${profitPlan.nextIso?' · '+esc(parseISO(profitPlan.nextIso).toLocaleDateString('en-US',{month:'short',day:'numeric'})):''}</span><span class="txt-profit">+${compoundingMoney(profitPlan.nextDateTarget,profitDayPlans.currency)}</span></div>`:''}`:'';
     if(tradeRows||compoundingRows||profitRows)tip=`<div class="cal-tip">${tradeRows}${compoundingRows}${profitRows}</div>`;
     const iso=calendarISODate(year,month,d),dateLabel=`${MONTH_NAMES[month]} ${d}, ${year}`,media=s&&imageMode?`<div class="cal-media" data-trade-ids="${s.tradeIds.join(',')}" data-date="${iso}" data-date-label="${esc(dateLabel)}"></div>`:'';
-    grid+=`<div class="cal-cell ${cls}" style="${accent}cursor:pointer;" onclick="openDayDetails(${year},${month},${d})"${isToday?' aria-current="date"':''}><div class="cal-daynum"><span>${d}</span>${s?`<span class="cal-count">${s.count}</span>`:''}</div>${media}${ph}${tip}</div>`;
+    grid+=`<div class="cal-cell ${cls} ${s?'recorded-session':'unrecorded-session'}" data-day="${String(d).padStart(2,'0')}" style="${accent}cursor:pointer;" onclick="openDayDetails(${year},${month},${d})"${isToday?' aria-current="date"':''}><div class="cal-daynum"><button type="button" class="cal-date-button" aria-label="View session for ${esc(dateLabel)}" onclick="event.stopPropagation();openDayDetails(${year},${month},${d})">${String(d).padStart(2,'0')}</button>${s?`<span class="cal-count">${s.count}</span>`:''}</div>${media}${!s?'<span class="cal-frame-empty">NO ENTRIES</span>':''}${ph}${tip}</div>`;
   });
   // Monthly summary
   const monthDays=Object.keys(dayStats);
@@ -7258,9 +7318,9 @@ function pageCalendar(){
     <div class="cal-sum-card"><div class="cal-sum-label">Best Day</div><div class="cal-sum-val txt-profit">${bestVal}<small class="cal-sum-date">${bestDay!=null?bestLabel:''}</small></div></div>
     <div class="cal-sum-card"><div class="cal-sum-label">Worst Day</div><div class="cal-sum-val txt-loss">${worstVal}<small class="cal-sum-date">${worstDay!=null?worstLabel:''}</small></div></div>
   </div>`;
-  return`<div class="page-head"><div><div class="eyebrow">Calendar Sheet</div></div><div class="cal-toolbar">${calendarAccountSelector()}${calendarImageModeControl()}<div class="cal-nav"><button onclick="calMove(-1)" aria-label="Previous month">←</button><div class="cal-month">${MONTH_NAMES[month]} ${year}</div><button onclick="calMove(1)" aria-label="Next month">→</button></div></div></div>
+  return`<div class="calendar-studio ${imageMode?'calendar-studio-images':''}"><div class="page-head"><div><div class="eyebrow">YOUR VISUAL JOURNAL</div><h1>Calendar<span>.</span></h1></div><div class="cal-toolbar">${calendarAccountSelector()}${calendarImageModeControl()}<div class="cal-nav"><button type="button" onclick="calendarGoToday()" class="cal-today-button">Today</button><button onclick="calMove(-1)" aria-label="Previous month">←</button><div class="cal-month">${MONTH_NAMES[month]} ${year}</div><button onclick="calMove(1)" aria-label="Next month">→</button></div></div></div>
   ${summary}${calendarCompoundingStatusHtml(compoundingModel)}${calendarProfitTargetStatusHtml(profitTargetModel)}
-  <div class="cal-grid">${grid}</div>`;
+  <div class="cal-board"><div class="cal-board-caption"><div class="cal-sheet-month"><strong>${MONTH_NAMES[month]} <span class="cal-heading-year">${year}</span></strong><span class="cal-month-description">${imageMode?'Chart journal':'Trading journal'}</span></div><div class="cal-month-stamp"><b>${monthDays.length}</b><span>active sessions</span><span class="cal-board-help">${imageMode?'Chart opens preview · Date opens details':'Select a date for details'}</span></div></div><div class="cal-board-scroll"><div class="cal-grid">${grid}</div></div></div></div>`;
 }
 function calMove(dir){calView.month+=dir;if(calView.month<0){calView.month=11;calView.year--;}if(calView.month>11){calView.month=0;calView.year++;}renderPage();}
 
@@ -12078,603 +12138,54 @@ function pageProfile(){
   }
 
   setTimeout(function(){
-    // Animate counters
-    document.querySelectorAll('[data-pcount]').forEach(function(el){
-      const target = parseFloat(el.getAttribute('data-pcount'));
-      const isFloat = el.getAttribute('data-pfloat')==='1';
-      const prefix = el.getAttribute('data-pprefix')||'';
-      const suffix = el.getAttribute('data-psuffix')||'';
-      if(isNaN(target)||target===0){return;}
-      const dur=1200, start=performance.now();
-      function tick(now){
-        const t=Math.min((now-start)/dur,1);
-        const e=1-Math.pow(1-t,4);
-        const cur=e*Math.abs(target);
-        el.textContent=prefix+(isFloat?cur.toFixed(1):Math.round(cur).toLocaleString())+suffix;
-        if(t<1) requestAnimationFrame(tick);
-      }
-      requestAnimationFrame(tick);
-    });
-    // Community Rank loads async (needs the roster fetch), same source of
-    // truth as the Legend Wall / Flex "Community Rank" field.
-    publicFlexRankLabel().then(function(label){
-      document.querySelectorAll('.np-rank-value').forEach(function(el){ el.textContent=label||'Unranked'; el.classList.remove('loading'); });
-    }).catch(function(){
-      document.querySelectorAll('.np-rank-value').forEach(function(el){ el.textContent='Unranked'; el.classList.remove('loading'); });
-    });
-    // Stagger cards
-    document.querySelectorAll('.np-card,.np-reputation,.np-rep-item,.np-stat,.np-achieve-item,.np-action-row').forEach(function(el,i){
-      el.style.opacity='0';
-      el.style.transform='translateY(16px)';
-      setTimeout(function(){
-        el.style.transition='opacity .45s ease,transform .45s cubic-bezier(.16,1,.3,1)';
-        el.style.opacity='1';
-        el.style.transform='translateY(0)';
-      },60+i*40);
-    });
+    if(!document.querySelector('.profile-desk'))return;
+    publicFlexRankLabel().then(function(label){document.querySelectorAll('.profile-desk .np-rank-value').forEach(el=>el.textContent=label||'Unranked');}).catch(function(){document.querySelectorAll('.profile-desk .np-rank-value').forEach(el=>el.textContent='Unavailable');});
   },30);
-
+  const metricRows=[
+    ['Closed trades',totalTrades],['Wins / losses / breakeven',wins+' / '+losses+' / '+be],
+    ['Profit factor',totalTrades?fmtNum(profitFactor):'—'],['Maximum drawdown',totalTrades?fmtPct(maxDD):'—'],
+    ['Average win',avgWin?fmtMoney(avgWin):'—'],['Average loss',avgLoss?fmtMoney(avgLoss):'—'],
+    ['Best winning streak',maxWS+' trades'],['Longest losing streak',maxLS+' trades']
+  ];
+  const lastDate=trades.filter(t=>t.pnl!=null&&t.date).map(t=>t.date).sort().pop();
   return `
-  <style>
-    @keyframes np-fade{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);}}
-    @keyframes np-bar-fill{from{width:0;}to{width:var(--bar-w);}}
-
-    /* ── LAYOUT ── */
-    .np-root{display:flex;flex-direction:column;gap:20px;}
-    .np-body-grid{display:grid;grid-template-columns:320px 1fr;gap:20px;align-items:start;}
-    @media(max-width:900px){.np-body-grid{grid-template-columns:1fr;}}
-    .np-left{display:flex;flex-direction:column;gap:20px;}
-    .np-right{display:flex;flex-direction:column;gap:20px;}
-
-    /* ── BASE GLASS CARD ──
-       Soft translucent surface, hairline border, quiet layered shadow.
-       No glow, no animated gradients — a still, premium panel. */
-    .np-card,.np-actions,.np-chart-card,.np-stat,.np-achieve-card{
-      background:linear-gradient(180deg,rgba(255,255,255,.025),rgba(255,255,255,0) 40%),var(--surface);
-      -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
-      border:1px solid var(--border-soft);
-      border-radius:16px;
-      box-shadow:0 1px 0 rgba(255,255,255,.03) inset,0 1px 2px rgba(0,0,0,.16),0 12px 28px -14px rgba(0,0,0,.4);
-      transition:border-color .2s ease,box-shadow .2s ease,transform .2s ease;
-    }
-
-    /* ── PREMIUM HEADER ── */
-    .np-header{
-      position:relative;overflow:hidden;
-      padding:28px 32px;
-      display:flex;align-items:center;justify-content:space-between;gap:24px;flex-wrap:wrap;
-    }
-    .np-header-id{display:flex;align-items:center;gap:20px;min-width:260px;}
-    .np-avatar-scene{position:relative;width:76px;height:76px;flex-shrink:0;}
-    .np-avatar{width:76px;height:76px;border-radius:50%;background:linear-gradient(150deg,#12253F,var(--accent) 120%);display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:600;color:#fff;font-family:'Outfit',sans-serif;position:relative;overflow:hidden;border:1px solid rgba(255,255,255,.08);}
-    .np-avatar-letter{position:relative;}
-    .np-name-block{display:flex;flex-direction:column;gap:5px;}
-    .np-name-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
-    .np-name{font-family:'Outfit',sans-serif;font-size:22px;font-weight:700;letter-spacing:-.01em;color:var(--text);line-height:1.15;}
-    .np-email{font-family:'DM Mono',monospace;font-size:11.5px;color:var(--text-faint);letter-spacing:.02em;}
-    .np-verified{display:inline-flex;align-items:center;gap:5px;background:rgba(0,229,160,.09);border:1px solid rgba(0,229,160,.22);border-radius:20px;padding:3px 10px;font-size:10.5px;font-weight:700;color:#00E5A0;letter-spacing:.02em;}
-    .np-member-since{font-size:10.5px;color:var(--text-faint);letter-spacing:.05em;text-transform:uppercase;}
-
-    /* ── QUICK STATS (in header) ── */
-    .np-quick-stats{display:flex;align-items:stretch;gap:0;}
-    .np-qs{padding:2px 22px;text-align:right;border-left:1px solid var(--border-soft);}
-    .np-qs:first-child{border-left:none;}
-    .np-qs-val{font-family:'Outfit',sans-serif;font-size:19px;font-weight:700;line-height:1.2;margin-bottom:3px;}
-    .np-qs-lbl{font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--text-faint);}
-    @media(max-width:640px){.np-header{padding:22px 20px;}.np-qs{padding:2px 14px;}}
-
-    /* ── ACTIONS CARD ── */
-    .np-action-row{display:flex;align-items:center;gap:14px;padding:16px 20px;cursor:pointer;position:relative;transition:background .18s ease;}
-    .np-action-row:hover{background:rgba(120,150,190,.05);}
-    .np-action-row:hover .np-arr{transform:translateX(3px);color:var(--accent);}
-    .np-action-row.danger:hover{background:rgba(255,77,109,.05);}
-    .np-action-row.danger:hover .np-action-t{color:#FF4D6D;}
-    .np-action-row.danger:hover .np-arr{color:#FF4D6D;}
-    .np-aico{width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
-    .np-action-t{font-size:13.5px;font-weight:600;color:var(--text);margin-bottom:2px;transition:color .18s ease;}
-    .np-action-d{font-size:11.5px;color:var(--text-faint);}
-    .np-arr{color:var(--text-faint);flex-shrink:0;transition:transform .2s ease,color .18s ease;}
-    .np-adivider{height:1px;background:var(--border-soft);margin:0 20px;}
-
-    /* ── ACHIEVEMENTS / BADGES CARD ── */
-    .np-achieve-head{display:flex;align-items:center;justify-content:space-between;padding:18px 20px 4px;}
-    .np-achieve-link{font-size:11px;font-weight:600;color:var(--accent);cursor:pointer;letter-spacing:.02em;}
-    .np-achieve-link:hover{text-decoration:underline;}
-    .np-league-strip{display:flex;align-items:center;gap:12px;padding:14px 20px;margin:8px 20px 4px;background:var(--surface-2);border:1px solid var(--border-soft);border-radius:12px;}
-    .np-league-icon{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;background:rgba(120,150,190,.08);}
-    .np-league-name{font-size:13px;font-weight:700;color:var(--text);}
-    .np-league-sub{font-size:10.5px;color:var(--text-faint);}
-    .np-league-score{margin-left:auto;text-align:right;}
-    .np-league-score-val{font-family:'Outfit',sans-serif;font-size:16px;font-weight:700;color:var(--text);}
-    .np-league-score-lbl{font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-faint);}
-    .np-achieve-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:14px 20px 20px;}
-    .np-achieve-item{background:var(--surface-2);border:1px solid var(--border-soft);border-radius:12px;padding:14px 10px;text-align:center;transition:border-color .18s ease,transform .18s ease;}
-    .np-achieve-item:hover{border-color:rgba(120,150,190,.3);transform:translateY(-2px);}
-    .np-achieve-icon{font-size:19px;margin-bottom:6px;}
-    .np-achieve-title{font-size:10.5px;font-weight:600;color:var(--text);line-height:1.25;margin-bottom:3px;}
-    .np-achieve-rarity{font-size:8.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-faint);}
-    .np-achieve-empty{margin:0 20px 20px;padding:20px;text-align:center;font-size:12px;color:var(--text-faint);background:var(--surface-2);border:1px dashed var(--border-soft);border-radius:12px;}
-
-    /* ── ACHIEVEMENT SNAPSHOT (overflow-safe grid) ── */
-    .np-snap-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 16px;}
-    @media(max-width:380px){.np-snap-grid{grid-template-columns:1fr;}}
-    .np-snap-item{min-width:0;}
-    .np-snap-label{font-size:9px;color:rgba(122,155,196,.5);text-transform:uppercase;letter-spacing:.1em;margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-    .np-snap-value{font-family:'Outfit',sans-serif;font-size:14px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:6px;min-width:0;}
-    .np-snap-icon{flex-shrink:0;}
-    .np-snap-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-
-    /* ── STATS GRID (right column) ── */
-    .np-stats-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;}
-    @media(max-width:700px){.np-stats-grid{grid-template-columns:repeat(2,1fr);}}
-    .np-stat{padding:16px 16px 14px;}
-    .np-stat:hover{border-color:rgba(120,150,190,.3);transform:translateY(-2px);}
-    .np-stat-val{font-family:'Outfit',sans-serif;font-size:21px;font-weight:700;line-height:1;margin-bottom:5px;color:var(--ns-color,var(--text));}
-    .np-stat-lbl{font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--text-faint);}
-
-    /* ── CHART CARD ── */
-    .np-chart-card{padding:20px 22px;}
-    .np-chart-title{font-family:'Outfit',sans-serif;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted);margin-bottom:3px;}
-    .np-chart-subtitle{font-size:11px;color:var(--text-faint);margin-bottom:16px;}
-
-    /* ── WIN / LOSS BREAKDOWN ── */
-    .np-breakdown{display:flex;align-items:center;gap:22px;}
-    .np-donut-wrap{flex-shrink:0;}
-    .np-breakdown-stats{flex:1;display:flex;flex-direction:column;gap:11px;}
-    .np-bstat{display:flex;align-items:center;justify-content:space-between;gap:8px;}
-    .np-bstat-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
-    .np-bstat-label{font-size:12px;color:var(--text-muted);flex:1;}
-    .np-bstat-val{font-family:'Outfit',sans-serif;font-size:13px;font-weight:700;}
-    .np-bstat-bar-wrap{width:70px;height:4px;background:var(--border);border-radius:2px;overflow:hidden;}
-    .np-bstat-bar{height:100%;border-radius:2px;animation:np-bar-fill .7s cubic-bezier(.16,1,.3,1) both;}
-
-    /* ── PERFORMANCE BARS ── */
-    .np-perf-row{display:flex;align-items:center;gap:10px;margin-bottom:11px;}
-    .np-perf-label{font-size:11.5px;color:var(--text-muted);width:80px;flex-shrink:0;}
-    .np-perf-bar-bg{flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden;}
-    .np-perf-bar{height:100%;border-radius:3px;animation:np-bar-fill .8s cubic-bezier(.16,1,.3,1) both;}
-    .np-perf-num{font-family:'Outfit',sans-serif;font-size:12px;font-weight:600;width:48px;text-align:right;flex-shrink:0;}
-
-    /* ── SECTION HEADER ── */
-    .np-section-head{display:flex;align-items:center;gap:10px;margin-bottom:14px;}
-    .np-section-title{font-family:'Outfit',sans-serif;font-size:12.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--text);}
-    .np-section-line{flex:1;height:1px;background:var(--border-soft);}
-
-    /* ── TRADER REPUTATION (premium fintech card grid, sits directly under the header) ──
-       Glass panel container with its own section head, holding five individual
-       reputation cards (Trader Score / League Tier / Trust Level / Community Rank /
-       Signature Achievement). Mirrors the visual language of Stripe / TradingView /
-       Bloomberg dashboard panels: quiet glass surface, hairline borders, restrained
-       color accents per metric, soft lift-on-hover — no glow, no neon. */
-    .np-reputation{position:relative;overflow:hidden;padding:22px 24px 24px;}
-    .np-reputation::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse 460px 180px at 100% 0%,rgba(124,58,237,.06),transparent 70%);pointer-events:none;}
-    .np-rep-head{display:flex;align-items:center;gap:10px;margin-bottom:16px;position:relative;z-index:1;}
-    .np-rep-head-icon{width:26px;height:26px;border-radius:8px;background:rgba(124,58,237,.12);color:#A78BFA;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
-    .np-rep-head-title{font-family:'Outfit',sans-serif;font-size:12.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text);}
-
-    .np-rep-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;position:relative;z-index:1;}
-    .np-rep-item{
-      background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,0) 45%),var(--surface-2);
-      border:1px solid var(--border-soft);
-      border-radius:14px;
-      padding:16px 16px 14px;
-      min-width:0;
-      position:relative;overflow:hidden;
-      transition:transform .22s cubic-bezier(.16,1,.3,1),border-color .22s ease,box-shadow .22s ease;
-    }
-    .np-rep-item:hover{transform:translateY(-3px);border-color:rgba(120,150,190,.32);box-shadow:0 14px 30px -16px rgba(0,0,0,.5);}
-    .np-rep-item:hover .np-rep-icon{transform:scale(1.06);}
-    .np-rep-icon{width:32px;height:32px;border-radius:9px;display:flex;align-items:center;justify-content:center;margin-bottom:12px;transition:transform .22s cubic-bezier(.16,1,.3,1);}
-    .np-rep-icon svg{width:16px;height:16px;}
-    .np-rep-label{font-family:'DM Mono',monospace;font-size:9px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--text-faint);margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-    .np-rep-value{font-family:'Outfit',sans-serif;font-size:18px;font-weight:700;color:var(--text);letter-spacing:-.1px;line-height:1.22;margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-    .np-rep-value.loading{color:var(--text-faint);font-weight:600;}
-    .np-rep-sub{font-size:10.5px;color:var(--text-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-    @media(max-width:900px){.np-rep-grid{grid-template-columns:repeat(3,1fr);}}
-    @media(max-width:560px){.np-rep-grid{grid-template-columns:repeat(2,1fr);}.np-reputation{padding:18px 16px 18px;}}
-
-    /* ── PROFILE VISUAL UPGRADE ── */
-    .np-root{position:relative;isolation:isolate;gap:18px;max-width:1540px;margin:0 auto;padding-bottom:26px;}
-    .np-root::before{content:'';position:absolute;z-index:-1;left:-12%;top:-80px;width:64%;height:370px;background:radial-gradient(ellipse,rgba(80,65,210,.12),transparent 68%);pointer-events:none;}
-    .np-header{min-height:194px;padding:30px 34px;border-color:rgba(122,98,224,.28);border-radius:22px;background:linear-gradient(118deg,rgba(13,11,38,.96),rgba(19,16,54,.91) 56%,rgba(7,31,51,.9));box-shadow:inset 0 1px rgba(255,255,255,.055),0 26px 70px -44px rgba(82,93,255,.85);}
-    .np-header::before{content:'';position:absolute;inset:0;pointer-events:none;background:linear-gradient(rgba(118,91,220,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(118,91,220,.035) 1px,transparent 1px),radial-gradient(440px 220px at 92% 0,rgba(0,229,255,.1),transparent 68%);background-size:28px 28px,28px 28px,auto;mask-image:linear-gradient(90deg,transparent 12%,#000 62%);}
-    .np-header::after{content:'';position:absolute;left:0;right:0;bottom:0;height:2px;background:linear-gradient(90deg,#00e5ff 0,#735bff 46%,#00e5a0 76%,transparent);opacity:.72;}
-    .np-header-id,.np-header-side{position:relative;z-index:1;}
-    .np-header-id{gap:22px;}
-    .np-avatar-scene{width:92px;height:92px;display:grid;place-items:center;}
-    .np-avatar-scene::before{content:'';position:absolute;inset:0;border-radius:50%;border:1px solid rgba(89,225,238,.27);box-shadow:0 0 0 7px rgba(89,225,238,.035),0 18px 42px -24px rgba(0,229,255,.9);}
-    .np-avatar-scene::after{content:'';position:absolute;right:4px;bottom:7px;width:13px;height:13px;border:3px solid #11102d;border-radius:50%;background:#46e6ad;box-shadow:0 0 13px rgba(70,230,173,.75);}
-    .np-avatar{width:76px;height:76px;border:1px solid rgba(130,224,245,.4);background:linear-gradient(145deg,#201a58,#4c3db2 50%,#087c91);box-shadow:inset 0 1px rgba(255,255,255,.12);}
-    .np-profile-kicker{display:flex;align-items:center;gap:7px;color:#61dfe9;font:750 8px/1 var(--font-mono);letter-spacing:.17em;text-transform:uppercase;margin-bottom:3px;}
-    .np-profile-kicker::before{content:'';width:17px;height:1px;background:#61dfe9;box-shadow:0 0 7px rgba(97,223,233,.65);}
-    .np-name{font-size:28px;letter-spacing:-.025em;}
-    .np-email{color:#8983a6;}
-    .np-identity-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;}
-    .np-identity-tag{display:inline-flex;align-items:center;gap:5px;min-height:22px;padding:3px 8px;border:1px solid rgba(123,92,255,.18);border-radius:20px;background:rgba(123,92,255,.06);color:#9790b5;font:650 8px/1 var(--font-mono);letter-spacing:.04em;}
-    .np-identity-tag.local::before{content:'';width:5px;height:5px;border-radius:50%;background:#4be0ae;box-shadow:0 0 8px rgba(75,224,174,.7);}
-    .np-header-side{display:flex;flex-direction:column;align-items:flex-end;gap:13px;}
-    .np-quick-stats{padding:12px 5px;border:1px solid rgba(123,92,255,.16);border-radius:14px;background:rgba(8,7,28,.38);box-shadow:inset 0 1px rgba(255,255,255,.025);backdrop-filter:blur(9px);}
-    .np-qs{min-width:104px;padding:2px 18px;text-align:left;}
-    .np-qs-val{font-size:21px;}
-    .np-profile-edit{height:34px;padding:0 14px;border:1px solid rgba(93,225,235,.26);border-radius:10px;background:linear-gradient(145deg,rgba(19,62,78,.7),rgba(38,27,83,.75));color:#bceff4;font:700 9px/1 var(--font-mono);letter-spacing:.06em;text-transform:uppercase;cursor:pointer;box-shadow:inset 0 1px rgba(255,255,255,.055);transition:transform .17s,border-color .17s,color .17s;}
-    .np-profile-edit:hover{transform:translateY(-2px);color:#fff;border-color:rgba(93,225,235,.52);}
-    .np-human-strip{position:relative;display:grid;grid-template-columns:minmax(0,1.45fr) minmax(300px,.85fr);gap:22px;align-items:center;overflow:hidden;padding:23px 25px;border:1px solid rgba(232,166,93,.19);border-radius:18px;background:radial-gradient(400px 170px at 0 100%,rgba(244,168,83,.075),transparent 72%),linear-gradient(122deg,rgba(23,16,45,.94),rgba(10,12,35,.92));box-shadow:inset 0 1px rgba(255,255,255,.035);}
-    .np-human-strip::before{content:'“';position:absolute;right:23px;top:-25px;color:rgba(244,179,99,.07);font:150px/1 Georgia,serif;pointer-events:none;}
-    .np-human-copy{position:relative;z-index:1;min-width:0;}
-    .np-human-eyebrow{display:flex;align-items:center;gap:8px;margin-bottom:8px;color:#e8ad67;font:700 8px/1 var(--font-mono);letter-spacing:.15em;text-transform:uppercase;}
-    .np-human-eyebrow::before{content:'';width:6px;height:6px;border-radius:50%;background:#e8ad67;box-shadow:0 0 10px rgba(232,173,103,.55);}
-    .np-human-title{margin:0 0 7px;color:#f0ecf8;font:650 24px/1.15 var(--font-display);letter-spacing:-.02em;}
-    .np-human-story{max-width:720px;margin:0;color:#a39bb8;font-size:12px;line-height:1.65;}
-    .np-human-bio{margin-top:9px;color:#736d89;font:500 9px/1.5 var(--font-mono);font-style:italic;}
-    .np-human-moments{position:relative;z-index:1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;}
-    .np-human-moment{min-width:0;padding:11px 10px;border:1px solid rgba(123,92,255,.14);border-radius:11px;background:rgba(7,7,26,.46);}
-    .np-human-moment span{display:block;margin-bottom:5px;color:#6f6886;font:700 7px/1 var(--font-mono);letter-spacing:.11em;text-transform:uppercase;}
-    .np-human-moment strong{display:block;overflow:hidden;text-overflow:ellipsis;color:#d8d3e5;font:700 11px/1.25 var(--font-body);white-space:nowrap;}
-    .np-human-action{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:1px;padding:9px 10px 0;color:#756e8c;font-size:9px;}
-    .np-human-action button{height:31px;padding:0 11px;border:1px solid rgba(232,173,103,.24);border-radius:9px;background:rgba(232,173,103,.065);color:#e7b77e;font:700 8px/1 var(--font-mono);letter-spacing:.06em;text-transform:uppercase;cursor:pointer;transition:transform .16s,border-color .16s,color .16s;}
-    .np-human-action button:hover{transform:translateY(-1px);border-color:rgba(232,173,103,.48);color:#fff0dc;}
-    .np-reputation{border-radius:18px;background:linear-gradient(155deg,rgba(15,12,40,.94),rgba(10,10,30,.92));}
-    .np-reputation::after{content:'LIVE IDENTITY';position:absolute;right:22px;top:23px;color:rgba(126,112,174,.52);font:700 7px/1 var(--font-mono);letter-spacing:.16em;}
-    .np-rep-grid{gap:10px;}
-    .np-rep-item{min-height:137px;padding:17px 16px;border-radius:13px;background:linear-gradient(155deg,rgba(30,23,67,.64),rgba(9,9,29,.62));}
-    .np-rep-item::after{content:'';position:absolute;left:14px;right:14px;top:0;height:1px;background:var(--rep-accent,#765ff0);opacity:.65;}
-    .np-rep-item:nth-child(1){--rep-accent:#a78bfa}.np-rep-item:nth-child(2){--rep-accent:#f0a93b}.np-rep-item:nth-child(3){--rep-accent:#00e5a0}.np-rep-item:nth-child(4){--rep-accent:#4da6ff}.np-rep-item:nth-child(5){--rep-accent:#efbd61}
-    .np-body-grid{grid-template-columns:minmax(290px,340px) minmax(0,1fr);gap:18px;}
-    .np-left,.np-right{gap:18px;}
-    .np-actions{overflow:hidden;border-radius:16px;background:linear-gradient(180deg,rgba(19,15,48,.94),rgba(9,9,28,.93));}
-    .np-action-row{min-height:76px;padding:16px 18px;}
-    .np-action-row:hover{background:linear-gradient(90deg,rgba(123,92,255,.09),rgba(0,229,255,.025));}
-    .np-aico{border-radius:11px!important;box-shadow:inset 0 1px rgba(255,255,255,.07);}
-    .np-dna-card{padding:20px;overflow:hidden;position:relative;}
-    .np-dna-card::after{content:'DNA';position:absolute;right:-5px;bottom:-24px;color:rgba(123,92,255,.045);font:800 88px/1 var(--font-display);letter-spacing:-.06em;pointer-events:none;}
-    .np-stat{position:relative;overflow:hidden;min-height:92px;padding:18px 17px;background:linear-gradient(150deg,rgba(24,19,57,.85),rgba(8,8,28,.8));}
-    .np-stat::before{content:'';position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--ns-color);opacity:.82;}
-    .np-stat::after{content:'';position:absolute;width:72px;height:72px;right:-36px;top:-38px;border-radius:50%;background:var(--ns-color);opacity:.055;}
-    .np-stat:hover{border-color:color-mix(in srgb,var(--ns-color) 32%,transparent);box-shadow:0 16px 34px -25px var(--ns-color);}
-    .np-chart-card{position:relative;overflow:hidden;padding:21px 23px;border-radius:17px;background:linear-gradient(155deg,rgba(17,13,43,.94),rgba(7,8,27,.92));}
-    .np-chart-card::before{content:'';position:absolute;right:-70px;top:-85px;width:180px;height:180px;border-radius:50%;background:radial-gradient(circle,rgba(83,71,194,.09),transparent 67%);pointer-events:none;}
-    .np-chart-title{position:relative;color:#e5e1f2;}
-    .np-chart-title::before{content:'';display:inline-block;width:5px;height:5px;margin-right:8px;border-radius:50%;background:#62dfea;box-shadow:0 0 8px rgba(98,223,234,.65);vertical-align:2px;}
-    .np-chart-card svg{max-width:100%;height:auto;}
-    .np-perf-bar-bg{background:rgba(95,78,153,.15);}
-    @media(max-width:1100px){.np-header{align-items:flex-start}.np-header-side{width:100%;align-items:stretch}.np-quick-stats{align-self:stretch}.np-profile-edit{align-self:flex-end}.np-rep-grid{grid-template-columns:repeat(3,1fr)}.np-human-strip{grid-template-columns:1fr}.np-human-moments{max-width:650px}}
-    @media(max-width:900px){.np-body-grid{grid-template-columns:1fr}.np-left{display:grid;grid-template-columns:1fr 1fr}.np-left>.np-dna-card{grid-column:1/-1}}
-    @media(max-width:640px){.np-root{gap:14px}.np-header{min-height:auto;padding:23px 19px}.np-header-id{align-items:flex-start}.np-avatar-scene{width:74px;height:74px}.np-avatar{width:62px;height:62px}.np-name{font-size:23px}.np-identity-tags{display:none}.np-quick-stats{display:grid;grid-template-columns:repeat(3,1fr)}.np-qs{min-width:0;padding:2px 10px}.np-qs-val{font-size:17px}.np-human-strip{padding:19px 17px}.np-human-title{font-size:21px}.np-human-moments{grid-template-columns:1fr 1fr}.np-human-moment:last-of-type{grid-column:1/-1}.np-rep-grid{grid-template-columns:repeat(2,1fr)}.np-rep-item{min-height:124px}.np-left{display:flex}.np-stats-grid{grid-template-columns:repeat(2,1fr)}}
-    @media(max-width:410px){.np-header-id{gap:13px}.np-avatar-scene{width:62px;height:62px}.np-avatar{width:52px;height:52px;font-size:21px}.np-name{font-size:20px}.np-email{max-width:190px;overflow:hidden;text-overflow:ellipsis}.np-qs{padding:2px 7px}.np-qs-lbl{font-size:8px}.np-rep-grid{grid-template-columns:1fr}.np-reputation::after{display:none}}
-  </style>
-
-  <div class="np-root">
-
-    <!-- Premium Profile Header -->
-    <div class="np-card np-header">
-      <div class="np-header-id">
-        <div class="np-avatar-scene">
-          <div class="np-avatar">
-            ${getAvatarDataUrl()?`<img src="${getAvatarDataUrl()}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`:`<span class="np-avatar-letter">${esc(initial)}</span>`}
-          </div>
-        </div>
-        <div class="np-name-block">
-          <div class="np-profile-kicker">Operator Identity</div>
-          <div class="np-name-row">
-            <div class="np-name">${esc(visibleName)}</div>
-            ${isVerified ? `<div class="np-verified"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="11" height="11"><polyline points="20 6 9 17 4 12"/></svg> Verified</div>` : ''}
-          </div>
-          <div class="np-email">${esc(email)}</div>
-          <div class="np-identity-tags"><span class="np-identity-tag local">Local-first profile</span><span class="np-identity-tag">${esc((state.dashboard&&state.dashboard.market)||'Forex')} workspace</span><span class="np-identity-tag">Member ${new Date().getFullYear()}</span></div>
-        </div>
-      </div>
-
-      <!-- Quick stats -->
-      <div class="np-header-side">
-        <div class="np-quick-stats">
-          <div class="np-qs">
-            <div class="np-qs-val" data-pcount="${totalTrades}">${totalTrades>0?'0':'—'}</div>
-            <div class="np-qs-lbl">Trades</div>
-          </div>
-          <div class="np-qs">
-            <div class="np-qs-val" data-pcount="${winRate}" data-pfloat="1" data-psuffix="%">${totalTrades>0?'0%':'—'}</div>
-            <div class="np-qs-lbl">Win Rate</div>
-          </div>
-          <div class="np-qs">
-            <div class="np-qs-val" style="color:${pnlColor};">${netPnlDisplay}</div>
-            <div class="np-qs-lbl">Net P&amp;L</div>
-          </div>
-        </div>
-        <button type="button" class="np-profile-edit" onclick="psActiveTab='profile';openProfileSettings()">Edit profile &nbsp;→</button>
-      </div>
+  <div class="profile-desk">
+    <header class="pd-page-head"><div><span class="pd-eyebrow">Your account</span><h1>Profile</h1></div><button type="button" class="pd-button pd-primary" onclick="psActiveTab='profile';openProfileSettings()">Edit profile <span aria-hidden="true">↗</span></button></header>
+    <div class="pd-layout">
+      <aside class="pd-sidebar">
+        <section class="pd-identity">
+          <div class="pd-avatar">${getAvatarDataUrl()?`<img src="${esc(getAvatarDataUrl())}" alt="Your profile photo">`:`<span>${esc(initial)}</span>`}</div>
+          <h2>${esc(visibleName)}</h2>
+          <p class="pd-email">${esc(email||'Personal journal')}</p>
+          ${isVerified?'<span class="pd-verified">Verified profile</span>':''}
+          <p class="pd-bio">${esc(profileExtra.bio||'Add a short bio to introduce yourself.')}</p>
+          <dl class="pd-facts"><div><dt>Location</dt><dd>${esc(profileExtra.country||'Not added')}</dd></div><div><dt>Workspace</dt><dd>${esc((state.dashboard&&state.dashboard.market)||'Forex')}</dd></div><div><dt>Trading days</dt><dd>${tradingDays}</dd></div><div><dt>Last closed trade</dt><dd>${lastDate?esc(lastDate):'No trades yet'}</dd></div></dl>
+          <div class="pd-completion"><div><span>Profile details</span><b>${profileCompleteness}%</b></div><progress max="100" value="${profileCompleteness}" aria-label="Profile completeness"></progress></div>
+        </section>
+        <nav class="pd-settings" aria-label="Profile settings">
+          <span class="pd-eyebrow">Manage account</span>
+          <button type="button" onclick="psActiveTab='profile';openProfileSettings()"><span><b>Personal details</b><small>Photo, bio and social links</small></span><span aria-hidden="true">›</span></button>
+          <button type="button" onclick="psActiveTab='trading';openProfileSettings()"><span><b>Trading preferences</b><small>Risk, privacy and appearance</small></span><span aria-hidden="true">›</span></button>
+          <button type="button" onclick="navigate('flex')"><span><b>Public trading profile</b><small>Manage what you share</small></span><span aria-hidden="true">›</span></button>
+          <div class="pd-unavailable"><span>Subscription &amp; billing</span><small>Coming soon</small></div>
+        </nav>
+      </aside>
+      <main class="pd-main">
+        <section class="pd-section pd-overview">
+          <header class="pd-section-head"><div><h2>Trading overview</h2><p>Results for the current account and market selection.</p></div><button type="button" class="pd-text-button" onclick="navigate('trades')">View trades ↗</button></header>
+          <div class="pd-highlights"><div><span>Net result</span><strong class="${netPnlNum<0?'pd-negative':'pd-positive'}">${netPnlDisplay}</strong></div><div><span>Win rate</span><strong>${totalTrades?fmtPct(winRate,1):'—'}</strong></div><div><span>Current balance</span><strong>${fmtMoney(currentBalance)}</strong></div><div><span>Return</span><strong>${totalTrades?fmtPct(returnPct,1):'—'}</strong></div></div>
+          <div class="pd-equity"><div class="pd-chart-caption"><span>Balance history</span><small>${totalTrades?'Starting balance '+fmtMoney(state.startingBalance||0):'Your history appears after you close a trade.'}</small></div>${miniSparkline(stats.curve,760,100)}</div>
+          <dl class="pd-metrics">${metricRows.map(([label,value])=>`<div><dt>${label}</dt><dd>${value}</dd></div>`).join('')}</dl>
+        </section>
+        <section class="pd-section">
+          <header class="pd-section-head"><div><h2>Community standing</h2><p>Calculated from your journal and the Legend Wall.</p></div><button type="button" class="pd-text-button" onclick="navigate('legendwall')">Legend Wall ↗</button></header>
+          <div class="pd-standing"><div><span>Trader score</span><strong>${totalTrades?pfTraderScore:'—'}<small>${totalTrades?' / 100':''}</small></strong></div><div><span>League</span><strong>${esc(pfLeague.name)}</strong></div><div><span>Confidence</span><strong>${esc(pfTrust.label)}</strong></div><div><span>Community rank</span><strong class="np-rank-value">Loading…</strong></div></div>
+          <div class="pd-scores">${[['Risk management',pfLwScores.risk],['Discipline',pfLwScores.discipline],['Execution',pfLwScores.execution],['Psychology',pfLwScores.psychology]].map(([name,score])=>`<div><label>${name}</label><progress max="100" value="${Math.max(0,Math.min(100,score||0))}" aria-label="${name} score"></progress><b>${score||0}</b></div>`).join('')}</div>
+          <div class="pd-style-note"><span>Trading pattern</span><b>${esc(pfStyle.label)}</b><small>${pfStyle.sub}</small></div>
+        </section>
+      </main>
     </div>
-
-    <!-- A human note from the trader's own journal -->
-    <div class="np-human-strip">
-      <div class="np-human-copy">
-        <div class="np-human-eyebrow">A note from your journal</div>
-        <h2 class="np-human-title">${greeting}, ${esc(firstName)}.</h2>
-        <p class="np-human-story">${esc(humanStory)}</p>
-        ${profileExtra.bio?`<div class="np-human-bio">“${esc(profileExtra.bio)}”</div>`:''}
-      </div>
-      <div class="np-human-moments">
-        <div class="np-human-moment"><span>Trading days</span><strong>${tradingDays||'Start today'}</strong></div>
-        <div class="np-human-moment"><span>Last journal entry</span><strong>${esc(latestTradeLabel)}</strong></div>
-        <div class="np-human-moment"><span>Profile complete</span><strong>${profileCompleteness}%</strong></div>
-        <div class="np-human-action"><span>${totalTrades?'Keep the process honest.':'One thoughtful trade is enough to begin.'}</span><button type="button" onclick="navigate('trades')">Open journal →</button></div>
-      </div>
-    </div>
-
-    <!-- Trader Reputation — first thing a visitor sees below the header -->
-    <div class="np-card np-reputation">
-      <div class="np-rep-head">
-        <div class="np-rep-head-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.9 6.26L22 9.27l-5 4.87L18.2 21 12 17.27 5.8 21 7 14.14 2 9.27l7.1-1.01L12 2z"/></svg></div>
-        <div class="np-rep-head-title">Trader Reputation</div>
-      </div>
-      <div class="np-rep-grid">
-
-        <div class="np-rep-item" title="Trader Score">
-          <div class="np-rep-icon" style="background:rgba(167,139,250,.12);color:#A78BFA;">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8M12 17v4M7 4h10v4a5 5 0 0 1-10 0V4z"/><path d="M7 5H3v2a4 4 0 0 0 4 4M17 5h4v2a4 4 0 0 1-4 4"/></svg>
-          </div>
-          <div class="np-rep-label">Trader Score</div>
-          <div class="np-rep-value">${totalTrades>0?pfTraderScore:'—'}</div>
-          <div class="np-rep-sub">${esc(pfScoreTag)}</div>
-        </div>
-
-        <div class="np-rep-item" title="League Tier">
-          <div class="np-rep-icon" style="background:${esc(pfLeague.color||'#7A9BC4')}22;color:${esc(pfLeague.color||'var(--text)')};">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6l4 4 6-8 6 8 4-4-2 13H4L2 6z"/></svg>
-          </div>
-          <div class="np-rep-label">League Tier</div>
-          <div class="np-rep-value" style="color:${esc(pfLeague.color||'var(--text)')};">${esc(pfLeague.name)}</div>
-          <div class="np-rep-sub">${esc(pfLeagueTag)}</div>
-        </div>
-
-        <div class="np-rep-item" title="Trust Level">
-          <div class="np-rep-icon" style="background:rgba(0,229,160,.12);color:#00E5A0;">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 3.5v6c0 5-3.4 8.7-8 10.5-4.6-1.8-8-5.5-8-10.5v-6L12 2z"/><path d="M8.5 12.2l2.3 2.3 4.7-4.8"/></svg>
-          </div>
-          <div class="np-rep-label">Trust Level</div>
-          <div class="np-rep-value">${esc(pfTrust.label)}</div>
-          <div class="np-rep-sub">${esc(pfTrustTag)}</div>
-        </div>
-
-        <div class="np-rep-item" title="Community Rank">
-          <div class="np-rep-icon" style="background:rgba(77,166,255,.12);color:#4DA6FF;">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M2.5 20c0-3.6 3-6.3 6.5-6.3s6.5 2.7 6.5 6.3"/><path d="M16 8.3a3 3 0 1 1 3.6 2.94M15.7 14c2.8.4 4.8 2.6 4.8 6"/></svg>
-          </div>
-          <div class="np-rep-label">Community Rank</div>
-          <div class="np-rep-value loading np-rank-value" id="np-identity-rank">—</div>
-          <div class="np-rep-sub">Live Network Ranking</div>
-        </div>
-
-        <div class="np-rep-item" title="Signature Achievement">
-          <div class="np-rep-icon" style="background:rgba(240,169,59,.12);color:#F0A93B;">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9" r="5.5"/><path d="M8.2 13.8L6.5 21l5.5-3 5.5 3-1.7-7.2"/></svg>
-          </div>
-          <div class="np-rep-label">Signature Achievement</div>
-          <div class="np-rep-value" title="${pfSignature?esc(pfSignature.title):''}">${pfSignature?esc(pfSignature.title):'None yet'}</div>
-          <div class="np-rep-sub" style="${pfSignature?'color:#F0A93B;':''}">${pfSignature?'Unlocked':'Not Unlocked'}</div>
-        </div>
-
-      </div>
-    </div>
-
-    <div class="np-body-grid">
-    <!-- LEFT COLUMN -->
-    <div class="np-left">
-
-      <!-- Actions -->
-      <div class="np-actions">
-        <div class="np-action-row" onclick="psActiveTab='profile';openProfileSettings()">
-          <div class="np-aico" style="background:rgba(0,229,160,.1);border:1px solid rgba(0,229,160,.2);">
-            <svg viewBox="0 0 24 24" fill="none" stroke="#00E5A0" stroke-width="1.8" width="18" height="18"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
-          </div>
-          <div style="flex:1;">
-            <div class="np-action-t">Profile Settings</div>
-            <div class="np-action-d">Username, photo, bio &amp; social links</div>
-          </div>
-          <svg class="np-arr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="9 18 15 12 9 6"/></svg>
-        </div>
-        <div class="np-adivider"></div>
-        <div class="np-action-row" onclick="psActiveTab='trading';openProfileSettings()">
-          <div class="np-aico" style="background:rgba(255,77,109,.1);border:1px solid rgba(255,77,109,.2);">
-            <svg viewBox="0 0 24 24" fill="none" stroke="#FF4D6D" stroke-width="1.8" width="18" height="18"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/></svg>
-          </div>
-          <div style="flex:1;">
-            <div class="np-action-t">Risk &amp; Security</div>
-            <div class="np-action-d">Risk limits, lot size, password &amp; 2FA</div>
-          </div>
-          <svg class="np-arr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="9 18 15 12 9 6"/></svg>
-        </div>
-        <div class="np-adivider"></div>
-        <div class="np-action-row" onclick="showToast('Plan management — coming soon 🚀')">
-          <div class="np-aico" style="background:rgba(240,169,59,.1);border:1px solid rgba(240,169,59,.2);">
-            <svg viewBox="0 0 24 24" fill="none" stroke="#F0A93B" stroke-width="1.8" width="18" height="18"><rect x="2" y="5" width="20" height="14" rx="2.5"/><path d="M2 9.5h20"/><circle cx="7" cy="14.5" r="1.2" fill="#F0A93B" stroke="none"/></svg>
-          </div>
-          <div style="flex:1;">
-            <div class="np-action-t">Subscription &amp; Billing</div>
-            <div class="np-action-d">Plan, payment methods &amp; upgrades</div>
-          </div>
-          <svg class="np-arr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="9 18 15 12 9 6"/></svg>
-        </div>
-      </div>
-
-      <!-- Achievements & Badges preview -->
-      <div class="np-card np-dna-card">
-        <div class="np-achieve-head">
-          <div class="np-section-title" style="margin:0;">Achievements</div>
-          <div class="np-achieve-link" onclick="navigate('legendwall')">View Legend Wall</div>
-        </div>
-        <div class="np-league-strip">
-          <div class="np-league-icon" style="color:${pfLeague.color};">${pfLeague.icon}</div>
-          <div>
-            <div class="np-league-name">${esc(pfLeague.name)} League</div>
-            <div class="np-league-sub">Current ranking tier</div>
-          </div>
-          <div class="np-league-score">
-            <div class="np-league-score-val">${pfLwScores.composite||0}</div>
-            <div class="np-league-score-lbl">Trader Score</div>
-          </div>
-        </div>
-        ${pfAchieveTiles.length ? `<div class="np-achieve-grid">${pfAchieveTiles.slice(0,6).map(function(b){
-          return `<div class="np-achieve-item">
-            <div class="np-achieve-icon">${b.icon}</div>
-            <div class="np-achieve-title">${esc(b.title)}</div>
-            <div class="np-achieve-rarity">${esc(b.rarity)}</div>
-          </div>`;
-        }).join('')}</div>` : `<div class="np-achieve-empty">No badges unlocked yet — keep journaling trades to earn your first one.</div>`}
-      </div>
-
-      <!-- Trading DNA -->
-      <div class="np-card">
-        <div class="np-section-head" style="margin-bottom:12px;">
-          <div class="np-section-title">Trading DNA</div>
-          <div class="np-section-line"></div>
-        </div>
-        <div class="np-perf-row">
-          <div class="np-perf-label">Risk Profile</div>
-          <div class="np-perf-bar-bg"><div class="np-perf-bar" style="width:${pfLwScores.risk}%;background:linear-gradient(90deg,#7C3AED,#A78BFA);"></div></div>
-          <div class="np-perf-num" style="color:#A78BFA;">${pfLwScores.risk}</div>
-        </div>
-        <div class="np-perf-row">
-          <div class="np-perf-label">Discipline</div>
-          <div class="np-perf-bar-bg"><div class="np-perf-bar" style="width:${pfLwScores.discipline}%;background:linear-gradient(90deg,#1E6FD9,#4DA6FF);"></div></div>
-          <div class="np-perf-num" style="color:#4DA6FF;">${pfLwScores.discipline}</div>
-        </div>
-        <div class="np-perf-row">
-          <div class="np-perf-label">Execution</div>
-          <div class="np-perf-bar-bg"><div class="np-perf-bar" style="width:${pfLwScores.execution}%;background:linear-gradient(90deg,#059669,#00E5A0);"></div></div>
-          <div class="np-perf-num" style="color:#00E5A0;">${pfLwScores.execution}</div>
-        </div>
-        <div class="np-perf-row" style="margin-bottom:0;">
-          <div class="np-perf-label">Psychology</div>
-          <div class="np-perf-bar-bg"><div class="np-perf-bar" style="width:${pfLwScores.psychology}%;background:linear-gradient(90deg,#F59E0B,#FBBF24);"></div></div>
-          <div class="np-perf-num" style="color:#F59E0B;">${pfLwScores.psychology}</div>
-        </div>
-        <div style="border-top:1px solid var(--border-soft);margin-top:12px;padding-top:12px;display:flex;justify-content:space-between;align-items:center;">
-          <div>
-            <div style="font-size:9px;color:rgba(122,155,196,.5);text-transform:uppercase;letter-spacing:.1em;margin-bottom:3px;">Trading Style</div>
-            <div style="font-family:'Outfit',sans-serif;font-size:14px;font-weight:700;color:var(--text);">${esc(pfStyle.label)}</div>
-          </div>
-          <div style="font-size:11px;color:var(--text-faint);text-align:right;">${pfStyle.sub}</div>
-        </div>
-      </div>
-
-    </div><!-- /LEFT -->
-
-    <!-- RIGHT COLUMN -->
-    <div class="np-right">
-
-      <!-- Stats Grid -->
-      <div>
-        <div class="np-section-head">
-          <div class="np-section-title">Trading Stats</div>
-          <div class="np-section-line"></div>
-        </div>
-        <div class="np-stats-grid">
-          <div class="np-stat" style="--ns-color:#4DA6FF;">
-            <div class="np-stat-val" data-pcount="${totalTrades}">${totalTrades>0?'0':'0'}</div>
-            <div class="np-stat-lbl">Total Trades</div>
-          </div>
-          <div class="np-stat" style="--ns-color:#00E5A0;">
-            <div class="np-stat-val" data-pcount="${wins}">${totalTrades>0?'0':'0'}</div>
-            <div class="np-stat-lbl">Wins</div>
-          </div>
-          <div class="np-stat" style="--ns-color:#FF4D6D;">
-            <div class="np-stat-val" data-pcount="${losses}">${totalTrades>0?'0':'0'}</div>
-            <div class="np-stat-lbl">Losses</div>
-          </div>
-          <div class="np-stat" style="--ns-color:${pnlColor};">
-            <div class="np-stat-val" style="font-size:17px;">${netPnlDisplay}</div>
-            <div class="np-stat-lbl">Net P&amp;L</div>
-          </div>
-          <div class="np-stat" style="--ns-color:#F59E0B;">
-            <div class="np-stat-val" data-pcount="${profitFactor}" data-pfloat="1">${totalTrades>0?'0':'—'}</div>
-            <div class="np-stat-lbl">Profit Factor</div>
-          </div>
-          <div class="np-stat" style="--ns-color:#A78BFA;">
-            <div class="np-stat-val" data-pcount="${maxDD}" data-pfloat="1" data-psuffix="%">${totalTrades>0?'0%':'—'}</div>
-            <div class="np-stat-lbl">Max Drawdown</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Equity Sparkline -->
-      <div class="np-chart-card">
-        <div class="np-chart-title">Equity Curve</div>
-        <div class="np-chart-subtitle">Account balance over time</div>
-        ${miniSparkline(stats.curve, 560, 80)}
-        <div style="display:flex;justify-content:space-between;margin-top:8px;">
-          <span style="font-size:11px;color:rgba(122,155,196,.45);">Start: <b style="color:var(--text);">${curSym()}${(state.startingBalance||0).toLocaleString()}</b></span>
-          <span style="font-size:11px;color:rgba(122,155,196,.45);">Current: <b style="color:${pnlColor};">${curSym()}${(currentBalance||0).toLocaleString()}</b></span>
-          <span style="font-size:11px;color:rgba(122,155,196,.45);">Return: <b style="color:${returnPct>=0?'#00E5A0':'#FF4D6D'};">${returnPct>=0?'+':''}${returnPct.toFixed(1)}%</b></span>
-        </div>
-      </div>
-
-      <!-- Win / Loss Breakdown -->
-      <div class="np-chart-card">
-        <div class="np-chart-title">Win / Loss Breakdown</div>
-        <div class="np-chart-subtitle">Trade result distribution</div>
-        <div class="np-breakdown">
-          <div class="np-donut-wrap">${miniDonut(wins,losses,be)}</div>
-          <div class="np-breakdown-stats">
-            <div class="np-bstat">
-              <div class="np-bstat-dot" style="background:#00E5A0;"></div>
-              <div class="np-bstat-label">Wins</div>
-              <div class="np-bstat-bar-wrap"><div class="np-bstat-bar" style="--bar-w:${totalTrades?Math.round(wins/totalTrades*100):0}%;width:var(--bar-w);background:#00E5A0;animation-delay:.1s;"></div></div>
-              <div class="np-bstat-val" style="color:#00E5A0;">${wins}</div>
-            </div>
-            <div class="np-bstat">
-              <div class="np-bstat-dot" style="background:#FF4D6D;"></div>
-              <div class="np-bstat-label">Losses</div>
-              <div class="np-bstat-bar-wrap"><div class="np-bstat-bar" style="--bar-w:${totalTrades?Math.round(losses/totalTrades*100):0}%;width:var(--bar-w);background:#FF4D6D;animation-delay:.2s;"></div></div>
-              <div class="np-bstat-val" style="color:#FF4D6D;">${losses}</div>
-            </div>
-            <div class="np-bstat">
-              <div class="np-bstat-dot" style="background:#F59E0B;"></div>
-              <div class="np-bstat-label">Break Even</div>
-              <div class="np-bstat-bar-wrap"><div class="np-bstat-bar" style="--bar-w:${totalTrades?Math.round(be/totalTrades*100):0}%;width:var(--bar-w);background:#F59E0B;animation-delay:.3s;"></div></div>
-              <div class="np-bstat-val" style="color:#F59E0B;">${be}</div>
-            </div>
-            <div style="border-top:1px solid var(--border-soft);padding-top:10px;margin-top:2px;display:grid;grid-template-columns:1fr 1fr;gap:6px;">
-              <div><div style="font-size:9px;color:rgba(122,155,196,.5);text-transform:uppercase;letter-spacing:.1em;margin-bottom:2px;">Avg Win</div><div style="font-family:'Outfit',sans-serif;font-size:13px;font-weight:700;color:#00E5A0;">${avgWin?fmtMoney(avgWin):'—'}</div></div>
-              <div><div style="font-size:9px;color:rgba(122,155,196,.5);text-transform:uppercase;letter-spacing:.1em;margin-bottom:2px;">Avg Loss</div><div style="font-family:'Outfit',sans-serif;font-size:13px;font-weight:700;color:#FF4D6D;">${avgLoss?fmtMoney(avgLoss):'—'}</div></div>
-              <div><div style="font-size:9px;color:rgba(122,155,196,.5);text-transform:uppercase;letter-spacing:.1em;margin-bottom:2px;">Best Streak</div><div style="font-family:'Outfit',sans-serif;font-size:13px;font-weight:700;color:#4DA6FF;">${maxWS} W</div></div>
-              <div><div style="font-size:9px;color:rgba(122,155,196,.5);text-transform:uppercase;letter-spacing:.1em;margin-bottom:2px;">Worst Streak</div><div style="font-family:'Outfit',sans-serif;font-size:13px;font-weight:700;color:#FF4D6D;">${maxLS} L</div></div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Performance Bars -->
-      <div class="np-chart-card">
-        <div class="np-chart-title">Performance Meters</div>
-        <div class="np-chart-subtitle">Key metrics at a glance</div>
-        <div style="margin-top:4px;">
-          <div class="np-perf-row">
-            <div class="np-perf-label">Win Rate</div>
-            <div class="np-perf-bar-bg"><div class="np-perf-bar" style="width:${Math.min(winRate,100)}%;background:linear-gradient(90deg,#1E6FD9,#00E5A0);animation-delay:.1s;"></div></div>
-            <div class="np-perf-num" style="color:#00E5A0;">${fmtPct(winRate,1)}</div>
-          </div>
-          <div class="np-perf-row">
-            <div class="np-perf-label">Profit Factor</div>
-            <div class="np-perf-bar-bg"><div class="np-perf-bar" style="width:${Math.min((profitFactor/3)*100,100)}%;background:linear-gradient(90deg,#F59E0B,#FBBF24);animation-delay:.2s;"></div></div>
-            <div class="np-perf-num" style="color:#F59E0B;">${profitFactor?profitFactor.toFixed(2):'—'}</div>
-          </div>
-          <div class="np-perf-row">
-            <div class="np-perf-label">Return</div>
-            <div class="np-perf-bar-bg"><div class="np-perf-bar" style="width:${Math.min(Math.abs(returnPct),100)}%;background:${returnPct>=0?'linear-gradient(90deg,#059669,#00E5A0)':'linear-gradient(90deg,#DC2626,#FF4D6D)'};animation-delay:.3s;"></div></div>
-            <div class="np-perf-num" style="color:${returnPct>=0?'#00E5A0':'#FF4D6D'};">${returnPct>=0?'+':''}${returnPct.toFixed(1)}%</div>
-          </div>
-          <div class="np-perf-row" style="margin-bottom:0;">
-            <div class="np-perf-label">Max Drawdown</div>
-            <div class="np-perf-bar-bg"><div class="np-perf-bar" style="width:${Math.min(maxDD,100)}%;background:linear-gradient(90deg,#7C3AED,#A78BFA);animation-delay:.4s;"></div></div>
-            <div class="np-perf-num" style="color:#A78BFA;">${maxDD?maxDD.toFixed(1)+'%':'—'}</div>
-          </div>
-        </div>
-      </div>
-
-    </div><!-- /RIGHT -->
-    </div><!-- /np-body-grid -->
-  </div>
-  `;
+  </div>`;
 }
 
 
