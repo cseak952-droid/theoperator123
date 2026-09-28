@@ -608,17 +608,39 @@ function syncActiveAccountFromState(){
 }
 
 const OPERATORS_JOURNAL_LOCAL_STORAGE_KEY='operators_journal_state_v1';
+const OPERATORS_JOURNAL_PENDING_STORAGE_KEY='operators_journal_pending_cloud_v1';
+let operatorsLastCloudSaveWarningAt=0;
+
+function operatorsJournalOwner(){
+  return String(window.__operatorsUser?.email||window.loggedInUser||'').trim().toLowerCase();
+}
+function readOperatorsPendingJournalState(){
+  try{
+    const pending=JSON.parse(localStorage.getItem(OPERATORS_JOURNAL_PENDING_STORAGE_KEY)||'null');
+    if(!pending||typeof pending.serialized!=='string')return null;
+    const owner=operatorsJournalOwner();
+    if(pending.owner&&owner&&pending.owner!==owner)return null;
+    return pending;
+  }catch(error){return null;}
+}
 
 async function loadState(){
   let oldSchemaDetected=false;
   let resetSavedTargetAccounts=false;
   let roadmapAnchorsMigrated=false;
+  let recoveredPendingCloudState=false;
   try{
     let serialized=null;
     if(window.__operatorsAuthenticatedStorage){
       state=JSON.parse(DEFAULT_JOURNAL_STATE_JSON);
-      const authenticatedRow=await window.storage.get('aurum_journal_data');
-      serialized=authenticatedRow&&authenticatedRow.value?authenticatedRow.value:null;
+      const pending=readOperatorsPendingJournalState();
+      if(pending){
+        serialized=pending.serialized;
+        recoveredPendingCloudState=true;
+      }else{
+        const authenticatedRow=await window.storage.get('aurum_journal_data');
+        serialized=authenticatedRow&&authenticatedRow.value?authenticatedRow.value:null;
+      }
     }
     if(!window.__operatorsAuthenticatedStorage&&String(window.name||'').startsWith('operatorsTargetBridge:')){
       serialized=String(window.name).slice('operatorsTargetBridge:'.length);
@@ -694,16 +716,35 @@ async function loadState(){
   if(!state.dashboard.sizes||typeof state.dashboard.sizes!=='object') state.dashboard.sizes={};
   Object.keys(state.dashboard.sizes).forEach(id=>{ if(!Object.keys(WIDGET_REGISTRY).includes(id)) delete state.dashboard.sizes[id]; });
   ensureFlexState();
-  if(resetSavedTargetAccounts||usdCurrencyMigrated||roadmapAnchorsMigrated)await saveState();
+  if(resetSavedTargetAccounts||usdCurrencyMigrated||roadmapAnchorsMigrated||recoveredPendingCloudState)await saveState();
 }
 async function saveState(){
   syncActiveAccountFromState();
   if(typeof normalizeTargetAccountModesForSave==='function')normalizeTargetAccountModesForSave();
   const serialized=JSON.stringify(state);
-  if(!window.__operatorsAuthenticatedStorage){
-    try{localStorage.setItem(OPERATORS_JOURNAL_LOCAL_STORAGE_KEY,serialized);}catch(e){console.error(e);}
+  try{localStorage.setItem(OPERATORS_JOURNAL_LOCAL_STORAGE_KEY,serialized);}catch(e){console.error(e);}
+  const pending={
+    owner:operatorsJournalOwner(),
+    serialized:serialized,
+    savedAt:new Date().toISOString(),
+    nonce:String(Date.now())+'-'+Math.random().toString(36).slice(2)
+  };
+  try{localStorage.setItem(OPERATORS_JOURNAL_PENDING_STORAGE_KEY,JSON.stringify(pending));}catch(e){console.error(e);}
+  try{
+    await window.storage.set('aurum_journal_data',serialized);
+    try{
+      const latest=readOperatorsPendingJournalState();
+      if(latest&&latest.nonce===pending.nonce)localStorage.removeItem(OPERATORS_JOURNAL_PENDING_STORAGE_KEY);
+    }catch(e){console.error(e);}
+    return true;
+  }catch(e){
+    console.error(e);
+    if(Date.now()-operatorsLastCloudSaveWarningAt>4000){
+      operatorsLastCloudSaveWarningAt=Date.now();
+      showToast('Saved on this device. Cloud sync will retry.');
+    }
+    return false;
   }
-  try{await window.storage.set('aurum_journal_data',serialized);}catch(e){console.error(e);}
 }
 
 async function switchAccount(newId){

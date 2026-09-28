@@ -1531,11 +1531,36 @@ async function operatorsAuthRequest(path,options){
   let body=null;
   try{body=await response.json();}catch{}
   if(!response.ok){
-    const error=new Error(body?.message||'Could not connect to The Operators Database.');
+    const error=new Error(body?.detail||body?.message||'Could not connect to The Operators Database.');
     error.status=response.status;
     throw error;
   }
   return body;
+}
+async function refreshOperatorsCloudSession(session){
+  session=readOperatorsSession()||session;
+  if(!session?.refreshToken){
+    throw Object.assign(new Error('Your session expired. Please sign in again.'),{status:401});
+  }
+  const renewed=await operatorsAuthRequest('/api/auth/refresh',{
+    method:'POST',
+    body:JSON.stringify({refreshToken:session.refreshToken})
+  });
+  saveOperatorsSession(renewed);
+  return renewed;
+}
+async function operatorsAuthenticatedRequest(path,options){
+  let session=readOperatorsSession();
+  if(!session?.token)throw Object.assign(new Error('Please sign in again.'),{status:401});
+  const send=()=>operatorsAuthRequest(path,Object.assign({},options||{}, {
+    headers:Object.assign({},options?.headers||{}, {Authorization:'Bearer '+session.token})
+  }));
+  try{return await send();}
+  catch(error){
+    if(error?.status!==401||!session.refreshToken)throw error;
+    session=await refreshOperatorsCloudSession(session);
+    return send();
+  }
 }
 function getRequestedFlexSlug(){
   const searchSlug = new URLSearchParams(window.location.search).get('flex');
@@ -1549,13 +1574,24 @@ async function connectJournalFrame(frame){
   try{
     const session=readOperatorsSession();
     if(!session?.token) throw new Error('Please sign in.');
-    const verified=await operatorsAuthRequest('/api/auth/session',{
-      method:'GET',
-      headers:{Authorization:'Bearer '+session.token}
+    const checked=await operatorsAuthenticatedRequest('/api/auth/session',{method:'GET'});
+    const currentSession=readOperatorsSession()||session;
+    const verified=Object.assign({},currentSession,checked,{
+      refreshToken:checked.refreshToken||currentSession.refreshToken
     });
     saveOperatorsSession(verified);
     frame.contentWindow.__OPERATORS_API_BASE = OPERATORS_DATABASE_URL;
     frame.contentWindow.__OPERATORS_SESSION = verified;
+    frame.contentWindow.__OPERATORS_REFRESH_SESSION = async function(){
+      const renewed=await refreshOperatorsCloudSession(readOperatorsSession());
+      frame.contentWindow.__OPERATORS_SESSION=renewed;
+      return renewed;
+    };
+    frame.contentWindow.__OPERATORS_SAVE_SESSION = function(renewed){
+      if(!renewed?.token)return;
+      saveOperatorsSession(renewed);
+      frame.contentWindow.__OPERATORS_SESSION=renewed;
+    };
     frame.contentWindow.__OPERATORS_PUBLIC_SLUG = getRequestedFlexSlug();
     frame.contentWindow.__OPERATORS_PARENT_URL = window.location.origin + window.location.pathname;
     await frame.contentWindow.eval(window.OPERATORS_BRIDGE_SOURCE);
@@ -2340,16 +2376,26 @@ window.OPERATORS_BRIDGE_SOURCE = String.raw`
   window.__operatorsUser = session.user || null;
   window.__operatorsAuthenticatedStorage = true;
 
-  async function request(path, options){
-    var settings = options || {};
+  async function request(path, options, hasRetried){
+    var settings = Object.assign({}, options || {});
     settings.headers = Object.assign({
       'Accept':'application/json',
-      'Content-Type':'application/json',
-      'Authorization':'Bearer '+token
+      'Content-Type':'application/json'
     }, settings.headers || {});
+    settings.headers.Authorization='Bearer '+token;
     var response = await fetch(apiBase + path, settings);
     var body = null;
     try{ body = await response.json(); }catch(e){}
+    if(response.status===401 && !hasRetried && typeof window.__OPERATORS_REFRESH_SESSION==='function'){
+      var renewed = await window.__OPERATORS_REFRESH_SESSION();
+      token = renewed && renewed.token;
+      session = renewed || session;
+      if(token){
+        window.__OPERATORS_SESSION=session;
+        if(typeof window.__OPERATORS_SAVE_SESSION==='function')window.__OPERATORS_SAVE_SESSION(session);
+        return request(path, options, true);
+      }
+    }
     if(!response.ok){
       var error = new Error((body && body.message) || 'Database request failed.');
       error.status = response.status;
