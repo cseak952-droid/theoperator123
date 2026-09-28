@@ -580,7 +580,18 @@ const TP_SIZE_METHODS=['Fixed Lot','% Account Risk','Fixed Units'];
 const FLEX_PRIVACY_ITEMS=[{key:'profile',label:'Profile'},{key:'statistics',label:'Statistics'},{key:'achievements',label:'Achievements'},{key:'certificates',label:'Certificates'},{key:'leaderboard',label:'Leaderboard Position'},{key:'tradingHistory',label:'Trading History'}];
 const FLEX_VIS_LABELS={public:'Public',private:'Private',friends:'Friends Only'};
 const QUALITIES=['A+','A','B','C'];
+// XAUUSD uses a 100 troy-ounce standard contract. The journal shows one
+// display pip as 0.10, while the Risk Calculator uses the broker point (0.01).
+// Keep the monetary conversion here so every page uses the same contract math.
 const PIP=0.1;
+const XAUUSD_CONTRACT_SIZE=100;
+const XAUUSD_BROKER_PIP=0.01;
+const XAUUSD_BROKER_PIP_VALUE=XAUUSD_CONTRACT_SIZE*XAUUSD_BROKER_PIP;
+function xauusdDirection(side){return String(side||'').toUpperCase()==='SELL'?-1:1;}
+function xauusdSignedPips(entry,exit,side){return((exit-entry)*xauusdDirection(side))/PIP;}
+function xauusdGrossPnl(entry,exit,lot,side){return(exit-entry)*xauusdDirection(side)*XAUUSD_CONTRACT_SIZE*lot;}
+function xauusdRiskDollars(entry,stop,lot){return Math.abs(entry-stop)*XAUUSD_CONTRACT_SIZE*lot;}
+function xauusdLotForRisk(balance,riskFraction,entry,stop){const perLot=xauusdRiskDollars(entry,stop,1);return perLot>0?(balance*riskFraction)/perLot:null;}
 
 function getActiveAccount(){return state.accounts.find(function(a){return a.id===state.activeAccountId;})||state.accounts[0];}
 function loadActiveAccountIntoState(){
@@ -1205,12 +1216,11 @@ function fmtPct(n,d=2){if(n===null||n===undefined||isNaN(n))return'—';return n
 function fmtNum(n,d=2){if(n===null||n===undefined||isNaN(n))return'—';return n.toFixed(d);}
 
 function calcTrade(t){
-  const dir=t.side==='BUY'?1:-1;
   const entry=num(t.entry),exit=num(t.exit),sl=num(t.sl),tp=num(t.tp),lot=num(t.lot)||0;
   const charges=num(t.charges)||0;
   let pips=null,pnl=null,grossPnl=null,slPips=null,riskDollar=null,riskPercent=null,tpPips=null,rr=null,posSize=null,result=null;
-  if(entry!=null&&exit!=null){pips=r1(((exit-entry)*dir)/PIP);grossPnl=r2(pips*lot*100);pnl=r2(grossPnl-charges);result=pnl>0.001?'WIN':(pnl<-0.001?'LOSS':'BE');}
-  if(entry!=null&&sl!=null){slPips=r1(Math.abs(entry-sl)/PIP);riskDollar=r2(slPips*lot*100);riskPercent=r2(riskDollar/state.startingBalance*100);posSize=slPips>0?r3((0.01*state.startingBalance)/(slPips*100)):null;}
+  if(entry!=null&&exit!=null){pips=r1(xauusdSignedPips(entry,exit,t.side));grossPnl=r2(xauusdGrossPnl(entry,exit,lot,t.side));pnl=r2(grossPnl-charges);result=pnl>0.001?'WIN':(pnl<-0.001?'LOSS':'BE');}
+  if(entry!=null&&sl!=null){slPips=r1(Math.abs(entry-sl)/PIP);riskDollar=r2(xauusdRiskDollars(entry,sl,lot));riskPercent=state.startingBalance>0?r2(riskDollar/state.startingBalance*100):null;const plannedLot=xauusdLotForRisk(state.startingBalance,0.01,entry,sl);posSize=plannedLot==null?null:r3(plannedLot);}
   if(entry!=null&&tp!=null){tpPips=r1(Math.abs(tp-entry)/PIP);}
   if(slPips&&tpPips&&slPips>0){rr=r2(tpPips/slPips);}
   const externalPnl=num(t.externalPnl);
@@ -6873,12 +6883,12 @@ function compoundingRoadmapSchedule(account,settings){
 }
 function compoundingTradeDateError(account,iso){const configured=account&&(account.roadmapConfigured??Boolean(targetPlan().compoundingConfigured));if(!account||targetAccountMode(account)!=='compounding'||!configured||!isIsoCalendarDate(iso))return'';const startDate=compoundingRoadmapStartDate(account),today=toISO(new Date());if(iso<startDate)return`This Compounding Roadmap begins on ${startDate}. Trades cannot be added before its start date.`;if(iso<today)return'Previous days are locked for an active Compounding Roadmap. Add the trade on today’s date.';return'';}
 function compoundingTradeMinimumDate(account){const configured=account&&(account.roadmapConfigured??Boolean(targetPlan().compoundingConfigured));if(!account||targetAccountMode(account)!=='compounding'||!configured)return'';const startDate=compoundingRoadmapStartDate(account),today=toISO(new Date());return startDate>today?startDate:today;}
-function compoundingLeveragePlan(balance,currency,lot,goldPrice){const balanceUsd=Math.max(0,Number(balance)||0),plannedLot=Math.max(.01,Number(lot)||.01),price=Math.max(1,Number(goldPrice)||4500),notional=price*100*plannedLot,exactRequired=balanceUsd>0?notional/balanceUsd:Infinity,requiredLeverage=Number.isFinite(exactRequired)?Math.max(1,Math.ceil(exactRequired)):null,capitalAt20=notional/20;return{balanceUsd,plannedLot,price,notional,requiredLeverage,capitalAt20,canUse20:balanceUsd>=capitalAt20,shortfall:Math.max(0,capitalAt20-balanceUsd)};}
+function compoundingLeveragePlan(balance,currency,lot,goldPrice){const balanceUsd=Math.max(0,Number(balance)||0),plannedLot=Math.max(.01,Number(lot)||.01),price=Math.max(1,Number(goldPrice)||4500),notional=price*XAUUSD_CONTRACT_SIZE*plannedLot,exactRequired=balanceUsd>0?notional/balanceUsd:Infinity,requiredLeverage=Number.isFinite(exactRequired)?Math.max(1,Math.ceil(exactRequired)):null,capitalAt20=notional/20;return{balanceUsd,plannedLot,price,notional,requiredLeverage,capitalAt20,canUse20:balanceUsd>=capitalAt20,shortfall:Math.max(0,capitalAt20-balanceUsd)};}
 function profitTargetLotSettings(account){const minPips=Math.max(1,Math.min(10000,Number(account?.profitTargetMinPips)||50)),maxPips=Math.max(minPips,Math.min(10000,Number(account?.profitTargetMaxPips)||100));return{minPips,maxPips};}
 function compoundingRoundLot(value){const lot=Number(value)||0;return lot>0?Math.max(.01,Math.ceil((lot-1e-9)*100)/100):0;}
 function targetLotRange(targetAmount,currency,minPips,maxPips){
   const targetUsd=Math.max(0,Number(targetAmount)||0),smallMove=Math.max(1,Number(minPips)||50),largeMove=Math.max(smallMove,Number(maxPips)||100);
-  return{min:compoundingRoundLot(targetUsd/largeMove),max:compoundingRoundLot(targetUsd/smallMove),targetUsd,smallMove,largeMove};
+  return{min:compoundingRoundLot(targetUsd/(largeMove*XAUUSD_BROKER_PIP_VALUE)),max:compoundingRoundLot(targetUsd/(smallMove*XAUUSD_BROKER_PIP_VALUE)),targetUsd,smallMove,largeMove};
 }
 function compoundingRoadmapData(){const account=targetActiveAccount(),settings=compoundingAccountSettings(account),schedule=account?compoundingRoadmapSchedule(account,settings):{startDate:toISO(new Date()),endDate:toISO(new Date()),baseDays:settings.days,totalDays:settings.days,extensionDays:0,lossDates:[],dates:compoundingTradingDateSequence(toISO(new Date()),settings.days)},start=account?compoundingRoadmapStartingBalance(account):0,currency='USD',rows=[];let balance=start;for(let day=1;day<=schedule.totalDays;day++){const opening=balance,target=opening*settings.rate/100,lossLimit=opening*settings.loss/100,lots=targetLotRange(target,currency,settings.minPips,settings.maxPips);balance=opening+target;rows.push({day,date:schedule.dates[day-1],opening,target,lossLimit,closing:balance,minLot:lots.min,maxLot:lots.max,recovery:day>schedule.baseDays});}return{account,start,days:schedule.totalDays,baseDays:schedule.baseDays,extensionDays:schedule.extensionDays,lossDates:schedule.lossDates,startDate:schedule.startDate,endDate:schedule.endDate,rate:settings.rate,loss:settings.loss,minPips:settings.minPips,maxPips:settings.maxPips,goldPrice:settings.goldPrice,configured:settings.configured,currency,rows,final:balance,growth:balance-start};}
 function targetAccountTradePnl(a,trade){if(!a||!trade)return 0;const pnl=Number(calcTrade(trade).pnl);return Number.isFinite(pnl)?pnl:0;}
@@ -7109,7 +7119,7 @@ function toggleTargetCustom(){const e=document.getElementById('target-custom-wra
 async function saveTargetSetup(){const p=targetPlan(),goal=Number(document.getElementById('target-goal').value),duration=document.getElementById('target-duration').value;if(!goal||goal<=0){showToast('Enter a valid profit goal');return;}p.goal=goal;p.goalConfigured=true;p.duration=duration;p.currency='USD';p.compoundingCurrency='USD';p.sessionStart=document.getElementById('target-session-start')?.value||p.sessionStart;p.sessionEnd=document.getElementById('target-session-end')?.value||p.sessionEnd;if(duration==='custom')p.endDate=document.getElementById('target-end').value||p.endDate;p.dailyLossLimit=targetPlanTradingStats(p).dailyLoss;targetEditingGoal=false;await saveState();showToast('USD target plan saved with automatic daily targets');renderPage();}
 function openTargetTradeModal(iso){const account=targetActiveAccount(),dateError=compoundingTradeDateError(account,iso);if(dateError){showToast(dateError);return;}targetSelectedDate=iso;targetTradeSide='BUY';document.getElementById('target-trade-modal')?.remove();const box=document.createElement('div');box.id='target-trade-modal';box.className='target-modal-backdrop';box.onclick=e=>{if(e.target===box)box.remove();};box.innerHTML=`<div class="target-modal"><div class="target-modal-head"><div><h2>Add trade</h2><div class="target-sub">${iso} · P&amp;L is calculated automatically in USD</div></div><button class="target-modal-close" onclick="document.getElementById('target-trade-modal').remove()">×</button></div><div class="target-trade-grid"><div class="target-field"><label>Side</label><div class="target-side-toggle"><button id="target-buy" class="active buy" onclick="setTargetSide('BUY')">BUY</button><button id="target-sell" class="sell" onclick="setTargetSide('SELL')">SELL</button></div></div><div class="target-field"><label>Entry</label><input id="target-entry" type="number" step="0.01" oninput="updateTargetPnlPreview()"></div><div class="target-field"><label>Exit</label><input id="target-exit" type="number" step="0.01" oninput="updateTargetPnlPreview()"></div><div class="target-field"><label>Lot</label><input id="target-lot" type="number" step="0.01" min="0.01" value="0.10" oninput="updateTargetPnlPreview()"></div><div class="target-field target-pnl-wrap"><label>Automatic P&amp;L (USD)</label><div class="target-pnl-preview" id="target-pnl-preview">—</div></div></div><div class="target-note">Saved as XAUUSD. All trade profit and loss values use USD.</div><div class="target-modal-actions"><button class="target-btn" onclick="document.getElementById('target-trade-modal').remove()">Cancel</button><button class="target-btn primary" onclick="saveTargetTrade('${iso}')">Save trade</button></div></div>`;document.body.appendChild(box);}
 function setTargetSide(side){targetTradeSide=side;document.getElementById('target-buy').className=side==='BUY'?'active buy':'buy';document.getElementById('target-sell').className=side==='SELL'?'active sell':'sell';updateTargetPnlPreview();}
-function targetModalPnl(){const e=Number(document.getElementById('target-entry')?.value),x=Number(document.getElementById('target-exit')?.value),l=Number(document.getElementById('target-lot')?.value);if(!e||!x||!l)return null;return((x-e)*(targetTradeSide==='BUY'?1:-1)/PIP)*l*100;}
+function targetModalPnl(){const e=Number(document.getElementById('target-entry')?.value),x=Number(document.getElementById('target-exit')?.value),l=Number(document.getElementById('target-lot')?.value);if(!e||!x||!l)return null;return r2(xauusdGrossPnl(e,x,l,targetTradeSide));}
 function updateTargetPnlPreview(){const v=targetModalPnl(),el=document.getElementById('target-pnl-preview');if(!el)return;el.textContent=v==null?'—':targetMoney(v,true);el.className='target-pnl-preview '+(v>=0?'target-positive':'target-negative');}
 async function saveTargetTrade(iso){const entry=Number(document.getElementById('target-entry').value),exit=Number(document.getElementById('target-exit').value),lot=Number(document.getElementById('target-lot').value),p=targetPlan(),account=targetActiveAccount(),dateError=compoundingTradeDateError(account,iso);if(dateError){showToast(dateError);return;}if(!entry||!exit||!lot){showToast('Enter Entry, Exit and Lot');return;}const trade={id:state.nextId++,date:iso,targetSessionDate:iso,targetSessionStart:p.sessionStart,targetSessionEnd:p.sessionEnd,targetTimeZone:'Asia/Kolkata',side:targetTradeSide,pair:'XAUUSD',strategy:'Target Calendar',lot,entry,exit,sl:'',tp:'',session:'Exness Forex',quality:'A',notes:'Added from Trading Calendar',slRemoved:false,ruleBroken:false,oversized:lot>(state.maxLotSize||1),targetAccountId:account?.id||null,targetPhase:account?.type==='funded'?(account.currentStage||'phase1'):'live'};state.trades.push(trade);if(account)linkTargetAccountAcrossPages(account.id);await saveState();document.getElementById('target-trade-modal')?.remove();showToast('Trade saved in USD');renderTopbar();renderPage();}
 
@@ -7509,7 +7519,7 @@ function riskCalcCompute(){
   const customWrap=document.getElementById('rc-custom-pip-wrap');
   customWrap.style.display=instrument==='CUSTOM'?'block':'none';
   let pipSize, pipValuePerLot;
-  if(instrument==='XAUUSD'){pipSize=0.01;pipValuePerLot=1;}
+  if(instrument==='XAUUSD'){pipSize=XAUUSD_BROKER_PIP;pipValuePerLot=XAUUSD_BROKER_PIP_VALUE;}
   else if(instrument==='FX'){pipSize=0.0001;pipValuePerLot=10;}
   else{pipSize=0.0001;pipValuePerLot=parseFloat(document.getElementById('rc-pip-value').value)||10;}
   const riskAmt=r2(bal*riskPct/100);
