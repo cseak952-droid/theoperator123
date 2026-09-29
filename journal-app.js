@@ -1050,6 +1050,14 @@ function openProfileSettings(){
       '</div>'+
 
       '<div class="ps-section">'+
+        '<div class="ps-card-head"><span class="ps-card-icon">☁</span><div class="ps-card-head-text"><span class="ps-section-t">Cloudflare Database</span><span class="ps-card-d">Choose where website data is securely saved</span></div></div>'+
+        '<div class="ps-toggle-row">'+
+          '<div><div class="ps-toggle-t">Database connection</div><div class="ps-toggle-d">Paste or replace the active Operators Database tunnel, then test the connection.</div></div>'+
+          '<button type="button" class="btn ps-save-btn" onclick="window.parent.postMessage({type:\'operators-open-database-settings\'},\'*\')">Open settings</button>'+
+        '</div>'+
+      '</div>'+
+
+      '<div class="ps-section">'+
         '<div class="ps-card-head"><span class="ps-card-icon">🛡</span><div class="ps-card-head-text"><span class="ps-section-t">Privacy</span><span class="ps-card-d">Manage what others can see</span></div></div>'+
         '<div class="ps-toggle-row">'+
           '<div><div class="ps-toggle-t">Public Profile</div><div class="ps-toggle-d">Show your Achievement Showcase, League tier and public achievements on Flex and the Community Wall</div></div>'+

@@ -933,6 +933,25 @@ body::before{
   transition:transform .2s ease,box-shadow .2s ease,filter .2s ease !important;
 }
 #page-auth .btn-continue:hover{transform:translateY(-2px);filter:brightness(1.06);box-shadow:0 17px 38px rgba(35,125,255,.38),inset 0 1px 0 rgba(255,255,255,.4) !important;}
+.database-connection-card{margin:2px 0 16px;padding:14px;border:1px solid rgba(82,170,255,.2);border-radius:13px;background:rgba(3,12,25,.55)}
+.database-connection-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
+.database-connection-title{font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#cbe5ff}
+.database-connection-badge{font-size:9px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#68e7bb;border:1px solid rgba(75,224,172,.25);background:rgba(35,196,143,.1);border-radius:999px;padding:4px 7px}
+.database-connection-card .field{margin:0 !important}
+.database-connection-help,.database-connection-status{display:block;font-size:10.5px;line-height:1.45;color:#7894b6;margin-top:7px}
+.database-connection-status{min-height:15px;color:#72c8ff}
+.database-connection-actions{display:flex;gap:8px;margin-top:10px}
+.database-test-button{flex:1;height:38px;border:1px solid rgba(86,175,255,.35);border-radius:9px;background:rgba(36,126,231,.14);color:#9bd7ff;font:700 11px/1 var(--font-body);letter-spacing:.03em;cursor:pointer}
+.database-test-button:hover{background:rgba(36,126,231,.22);border-color:rgba(86,175,255,.55)}
+.database-modal-backdrop{position:fixed;inset:0;z-index:4000;display:none;align-items:center;justify-content:center;padding:20px;background:rgba(0,4,12,.78);backdrop-filter:blur(10px)}
+.database-modal-backdrop.show{display:flex}
+.database-modal{width:min(500px,100%);padding:24px;border:1px solid rgba(91,177,255,.3);border-radius:18px;background:linear-gradient(155deg,#0c1a2c,#050d19);box-shadow:0 28px 90px rgba(0,0,0,.58)}
+.database-modal-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;margin-bottom:18px}
+.database-modal h2{margin:0;color:#edf7ff;font-size:21px}.database-modal p{margin:6px 0 0;color:#83a0c1;font-size:12px;line-height:1.5}
+.database-modal-close{width:36px;height:36px;border:1px solid rgba(127,174,225,.22);border-radius:10px;background:rgba(255,255,255,.03);color:#a9c7e8;cursor:pointer}
+.database-modal .field input{height:48px;border-radius:11px;background:#030b16}
+.database-modal-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:15px}.database-modal-actions button{min-width:112px;height:42px;border-radius:10px;cursor:pointer;font-weight:800}
+.database-modal-cancel{border:1px solid rgba(127,174,225,.22);background:transparent;color:#a9c7e8}.database-modal-save{border:0;background:linear-gradient(135deg,#34d8ff,#3188ff 60%,#6b67ff);color:#03101b}
 #page-auth .card-footer{padding:17px 30px !important;background:rgba(1,6,14,.32) !important;border-top-color:rgba(120,170,230,.12) !important;}
 #page-auth .secured{padding:11px 0 14px !important;font-size:9px !important;letter-spacing:.18em !important;opacity:.48;}
 #page-auth .brand-mark{top:24px !important;left:28px !important;}
@@ -1440,6 +1459,22 @@ function closeMobileMenu(){
           <button type="button" class="password-toggle" id="passwordToggle" aria-label="Show password">Show</button>
         </div>
       </div>
+
+      <section class="database-connection-card" aria-labelledby="databaseConnectionTitle">
+        <div class="database-connection-head">
+          <span class="database-connection-title" id="databaseConnectionTitle">Database settings</span>
+          <span class="database-connection-badge">Cloudflare</span>
+        </div>
+        <div class="field">
+          <label for="databaseUrl">Cloudflare database link</label>
+          <input type="url" id="databaseUrl" placeholder="https://your-tunnel.trycloudflare.com" autocomplete="url" inputmode="url">
+          <small class="database-connection-help">Paste the HTTPS link shown by Operators Database Remote Access.</small>
+          <span class="database-connection-status" id="databaseUrlStatus" aria-live="polite"></span>
+        </div>
+        <div class="database-connection-actions">
+          <button type="button" class="database-test-button" id="databaseUrlTestButton" onclick="testAndSaveOperatorsDatabase('auth')">Test &amp; save connection</button>
+        </div>
+      </section>
 <div class="error-msg" id="errorMsg">Please enter a valid email address.</div>
 
       <button type="submit" class="btn-continue" id="continueBtn">
@@ -1460,6 +1495,24 @@ function closeMobileMenu(){
 </div>
   </main>
 </div>
+</div>
+
+<div class="database-modal-backdrop" id="operatorsDatabaseSettingsModal" role="dialog" aria-modal="true" aria-labelledby="operatorsDatabaseSettingsTitle" onclick="if(event.target===this)closeOperatorsDatabaseSettings()">
+  <div class="database-modal">
+    <div class="database-modal-head">
+      <div><h2 id="operatorsDatabaseSettingsTitle">Cloudflare database</h2><p>Change the active Operators Database tunnel. The website will test it before reconnecting your journal.</p></div>
+      <button type="button" class="database-modal-close" aria-label="Close database settings" onclick="closeOperatorsDatabaseSettings()">✕</button>
+    </div>
+    <div class="field">
+      <label for="databaseSettingsUrl">Cloudflare HTTPS link</label>
+      <input type="url" id="databaseSettingsUrl" placeholder="https://your-tunnel.trycloudflare.com" autocomplete="url" inputmode="url">
+      <span class="database-connection-status" id="databaseSettingsStatus" aria-live="polite"></span>
+    </div>
+    <div class="database-modal-actions">
+      <button type="button" class="database-modal-cancel" onclick="closeOperatorsDatabaseSettings()">Cancel</button>
+      <button type="button" class="database-modal-save" id="databaseSettingsSaveButton" onclick="testAndSaveOperatorsDatabase('modal')">Test &amp; connect</button>
+    </div>
+  </div>
 </div>
 
 <div id="page-app" style="display:none; position:fixed; inset:0; z-index:1000; background:#04080F;">
@@ -1505,13 +1558,81 @@ window.addEventListener('message',function(event){
   if(event.source===document.getElementById('journalFrame')&&event.data?.type==='operators-sign-out'){
     signOutOperatorsUser();
   }
+  if(event.source===document.getElementById('journalFrame')&&event.data?.type==='operators-open-database-settings'){
+    openOperatorsDatabaseSettings();
+  }
 });
 
 let journalLoaded = false;
 const OPERATORS_AUTH_STORAGE_KEY = 'operators_journal_session';
-const OPERATORS_DATABASE_URL = ['127.0.0.1','localhost',''].includes(window.location.hostname)
+const OPERATORS_DATABASE_URL_KEY = 'operators_database_url';
+const OPERATORS_DEFAULT_DATABASE_URL = ['127.0.0.1','localhost',''].includes(window.location.hostname)
   ? 'http://127.0.0.1:5784'
   : 'https://epinions-jon-preview-denied.trycloudflare.com';
+let OPERATORS_DATABASE_URL = localStorage.getItem(OPERATORS_DATABASE_URL_KEY)||OPERATORS_DEFAULT_DATABASE_URL;
+
+function normalizeOperatorsDatabaseUrl(value){
+  const trimmed=String(value||'').trim().replace(/\/$/,'');
+  const parsed=new URL(trimmed);
+  const localDevelopment=['127.0.0.1','localhost'].includes(parsed.hostname)&&['127.0.0.1','localhost'].includes(window.location.hostname);
+  if(parsed.protocol!=='https:'&&!localDevelopment)throw new Error('Use the HTTPS Cloudflare link from Operators Database.');
+  if(parsed.username||parsed.password||parsed.search||parsed.hash)throw new Error('Paste only the main Cloudflare HTTPS address.');
+  return parsed.origin;
+}
+function syncOperatorsDatabaseInputs(){
+  const authInput=document.getElementById('databaseUrl');
+  const modalInput=document.getElementById('databaseSettingsUrl');
+  if(authInput)authInput.value=OPERATORS_DATABASE_URL;
+  if(modalInput)modalInput.value=OPERATORS_DATABASE_URL;
+}
+function selectedOperatorsDatabaseUrl(){
+  const authInput=document.getElementById('databaseUrl');
+  const value=String(authInput?.value||OPERATORS_DATABASE_URL||OPERATORS_DEFAULT_DATABASE_URL).trim();
+  OPERATORS_DATABASE_URL=normalizeOperatorsDatabaseUrl(value);
+  localStorage.setItem(OPERATORS_DATABASE_URL_KEY,OPERATORS_DATABASE_URL);
+  syncOperatorsDatabaseInputs();
+  return OPERATORS_DATABASE_URL;
+}
+function openOperatorsDatabaseSettings(){
+  syncOperatorsDatabaseInputs();
+  const modal=document.getElementById('operatorsDatabaseSettingsModal');
+  modal?.classList.add('show');
+  setTimeout(()=>document.getElementById('databaseSettingsUrl')?.focus(),0);
+}
+function closeOperatorsDatabaseSettings(){
+  document.getElementById('operatorsDatabaseSettingsModal')?.classList.remove('show');
+}
+async function testAndSaveOperatorsDatabase(source){
+  const input=document.getElementById(source==='modal'?'databaseSettingsUrl':'databaseUrl');
+  const status=document.getElementById(source==='modal'?'databaseSettingsStatus':'databaseUrlStatus');
+  const button=document.getElementById(source==='modal'?'databaseSettingsSaveButton':'databaseUrlTestButton');
+  if(status){status.textContent='Testing secure connection…';status.style.color='#72c8ff';}
+  if(button)button.disabled=true;
+  try{
+    const nextUrl=normalizeOperatorsDatabaseUrl(input?.value);
+    const response=await fetch(nextUrl+'/api/health',{headers:{Accept:'application/json'}});
+    let body=null;try{body=await response.json();}catch{}
+    if(!response.ok||body?.status!=='ready')throw new Error(body?.message||'Operators Database is not ready at this link.');
+    OPERATORS_DATABASE_URL=nextUrl;
+    localStorage.setItem(OPERATORS_DATABASE_URL_KEY,nextUrl);
+    syncOperatorsDatabaseInputs();
+    if(status){status.textContent='Connected · Operators Database is ready';status.style.color='#68e7bb';}
+    showToast('Cloudflare database connected.');
+    if(source==='modal'){
+      closeOperatorsDatabaseSettings();
+      const frame=document.getElementById('journalFrame');
+      if(frame&&readOperatorsSession()?.token){
+        journalLoaded=false;
+        frame.src='about:blank';
+        setTimeout(showApp,50);
+      }
+    }
+    return true;
+  }catch(error){
+    if(status){status.textContent=error?.message||'Connection failed.';status.style.color='#ff8298';}
+    return false;
+  }finally{if(button)button.disabled=false;}
+}
 
 function readOperatorsSession(){
   try{return JSON.parse(localStorage.getItem(OPERATORS_AUTH_STORAGE_KEY)||'null');}
@@ -1525,7 +1646,7 @@ function clearOperatorsSession(){
 }
 
 async function operatorsAuthRequest(path,options){
-  const response=await fetch(OPERATORS_DATABASE_URL+path,Object.assign({
+  const response=await fetch(selectedOperatorsDatabaseUrl()+path,Object.assign({
     headers:{'Content-Type':'application/json'}
   },options||{}));
   let body=null;
@@ -1580,7 +1701,7 @@ async function connectJournalFrame(frame){
       refreshToken:checked.refreshToken||currentSession.refreshToken
     });
     saveOperatorsSession(verified);
-    frame.contentWindow.__OPERATORS_API_BASE = OPERATORS_DATABASE_URL;
+    frame.contentWindow.__OPERATORS_API_BASE = selectedOperatorsDatabaseUrl();
     frame.contentWindow.__OPERATORS_SESSION = verified;
     frame.contentWindow.__OPERATORS_REFRESH_SESSION = async function(){
       const renewed=await refreshOperatorsCloudSession(readOperatorsSession());
@@ -2451,6 +2572,7 @@ const termsCheck = document.getElementById('termsCheck');
 const passwordStrength = document.getElementById('passwordStrength');
 const passwordStrengthBar = passwordStrength?.querySelector('span');
 const passwordToggle = document.getElementById('passwordToggle');
+syncOperatorsDatabaseInputs();
 
 function toggleMode(){
   mode = mode === 'signin' ? 'signup' : 'signin';

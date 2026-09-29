@@ -48,5 +48,10 @@ assert.match(appSource, /OPERATORS_JOURNAL_PENDING_STORAGE_KEY/);
 assert.match(appSource, /localStorage\.setItem\(OPERATORS_JOURNAL_PENDING_STORAGE_KEY/);
 assert.match(appSource, /if\(latest&&latest\.nonce===pending\.nonce\)localStorage\.removeItem\(OPERATORS_JOURNAL_PENDING_STORAGE_KEY\)/);
 assert.match(appSource, /recoveredPendingCloudState=true/);
+assert.match(indexSource, /const OPERATORS_DATABASE_URL_KEY = 'operators_database_url'/);
+assert.match(indexSource, /fetch\(selectedOperatorsDatabaseUrl\(\)\+path/);
+assert.match(indexSource, /testAndSaveOperatorsDatabase/);
+assert.match(indexSource, /operators-open-database-settings/);
+assert.match(appSource, /operators-open-database-settings/);
 
 console.log('Cloud sync recovery regression tests passed.');
