@@ -610,6 +610,7 @@ function syncActiveAccountFromState(){
 const OPERATORS_JOURNAL_LOCAL_STORAGE_KEY='operators_journal_state_v1';
 const OPERATORS_JOURNAL_PENDING_STORAGE_KEY='operators_journal_pending_cloud_v1';
 let operatorsLastCloudSaveWarningAt=0;
+let operatorsCloudSaveQueue=Promise.resolve();
 
 function operatorsJournalOwner(){
   return String(window.__operatorsUser?.email||window.loggedInUser||'').trim().toLowerCase();
@@ -623,6 +624,33 @@ function readOperatorsPendingJournalState(){
     return pending;
   }catch(error){return null;}
 }
+
+function queueOperatorsPendingJournalUpload(showWarning){
+  const upload=async function(){
+    const pending=readOperatorsPendingJournalState();
+    if(!pending||!window.__operatorsAuthenticatedStorage||!window.storage?.set)return !pending;
+    try{
+      await window.storage.set('aurum_journal_data',pending.serialized);
+      const latest=readOperatorsPendingJournalState();
+      if(latest&&latest.nonce===pending.nonce)localStorage.removeItem(OPERATORS_JOURNAL_PENDING_STORAGE_KEY);
+      return true;
+    }catch(error){
+      console.error(error);
+      if(showWarning&&Date.now()-operatorsLastCloudSaveWarningAt>4000){
+        operatorsLastCloudSaveWarningAt=Date.now();
+        showToast('Saved on this device. Cloud sync will retry.');
+      }
+      return false;
+    }
+  };
+  const queued=operatorsCloudSaveQueue.then(upload,upload);
+  operatorsCloudSaveQueue=queued.catch(function(){});
+  return queued;
+}
+
+window.addEventListener('online',function(){queueOperatorsPendingJournalUpload(false);});
+document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible')queueOperatorsPendingJournalUpload(false);});
+setInterval(function(){if(document.visibilityState==='visible')queueOperatorsPendingJournalUpload(false);},15000);
 
 async function loadState(){
   let oldSchemaDetected=false;
@@ -730,21 +758,7 @@ async function saveState(){
     nonce:String(Date.now())+'-'+Math.random().toString(36).slice(2)
   };
   try{localStorage.setItem(OPERATORS_JOURNAL_PENDING_STORAGE_KEY,JSON.stringify(pending));}catch(e){console.error(e);}
-  try{
-    await window.storage.set('aurum_journal_data',serialized);
-    try{
-      const latest=readOperatorsPendingJournalState();
-      if(latest&&latest.nonce===pending.nonce)localStorage.removeItem(OPERATORS_JOURNAL_PENDING_STORAGE_KEY);
-    }catch(e){console.error(e);}
-    return true;
-  }catch(e){
-    console.error(e);
-    if(Date.now()-operatorsLastCloudSaveWarningAt>4000){
-      operatorsLastCloudSaveWarningAt=Date.now();
-      showToast('Saved on this device. Cloud sync will retry.');
-    }
-    return false;
-  }
+  return queueOperatorsPendingJournalUpload(true);
 }
 
 async function switchAccount(newId){
@@ -6930,8 +6944,11 @@ function compoundingRoadmapSchedule(account,settings){
   const indexByDate={};dates.forEach((date,index)=>{indexByDate[date]=index;});
   return{startDate,endDate:dates[dates.length-1]||startDate,baseDays,totalDays,lossDates,extensionDays:lossDates.length,dates,indexByDate,dailyPnl};
 }
-function compoundingTradeDateError(account,iso){const configured=account&&(account.roadmapConfigured??Boolean(targetPlan().compoundingConfigured));if(!account||targetAccountMode(account)!=='compounding'||!configured||!isIsoCalendarDate(iso))return'';const startDate=compoundingRoadmapStartDate(account),today=toISO(new Date());if(iso<startDate)return`This Compounding Roadmap begins on ${startDate}. Trades cannot be added before its start date.`;if(iso<today)return'Previous days are locked for an active Compounding Roadmap. Add the trade on today’s date.';return'';}
-function compoundingTradeMinimumDate(account){const configured=account&&(account.roadmapConfigured??Boolean(targetPlan().compoundingConfigured));if(!account||targetAccountMode(account)!=='compounding'||!configured)return'';const startDate=compoundingRoadmapStartDate(account),today=toISO(new Date());return startDate>today?startDate:today;}
+// Historical executions are valid journal records even when they pre-date a
+// newly-created Roadmap. The Roadmap engine still ignores dates outside its
+// own schedule; only the entry form is unlocked here.
+function compoundingTradeDateError(){return'';}
+function compoundingTradeMinimumDate(){return'';}
 function compoundingLeveragePlan(balance,currency,lot,goldPrice){const balanceUsd=Math.max(0,Number(balance)||0),plannedLot=Math.max(.01,Number(lot)||.01),price=Math.max(1,Number(goldPrice)||4500),notional=price*XAUUSD_CONTRACT_SIZE*plannedLot,exactRequired=balanceUsd>0?notional/balanceUsd:Infinity,requiredLeverage=Number.isFinite(exactRequired)?Math.max(1,Math.ceil(exactRequired)):null,capitalAt20=notional/20;return{balanceUsd,plannedLot,price,notional,requiredLeverage,capitalAt20,canUse20:balanceUsd>=capitalAt20,shortfall:Math.max(0,capitalAt20-balanceUsd)};}
 function profitTargetLotSettings(account){const minPips=Math.max(1,Math.min(10000,Number(account?.profitTargetMinPips)||50)),maxPips=Math.max(minPips,Math.min(10000,Number(account?.profitTargetMaxPips)||100));return{minPips,maxPips};}
 function compoundingRoundLot(value){const lot=Number(value)||0;return lot>0?Math.max(.01,Math.ceil((lot-1e-9)*100)/100):0;}
